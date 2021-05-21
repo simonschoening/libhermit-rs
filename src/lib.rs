@@ -28,7 +28,8 @@
 #![feature(abi_x86_interrupt)]
 #![feature(allocator_api)]
 #![feature(const_btree_new)]
-#![feature(const_fn)]
+//#![feature(const_fn)]
+#![feature(const_fn_trait_bound)]
 #![feature(const_mut_refs)]
 #![feature(global_asm)]
 #![feature(lang_items)]
@@ -306,7 +307,6 @@ extern "C" fn initd(_arg: usize) {
 	let (argc, argv, environ) = syscalls::get_application_parameters();
 
 	config::sanity_check();
-
 	// give the IP thread time to initialize the network interface
 	core_scheduler().reschedule();
 
@@ -377,8 +377,8 @@ fn boot_processor_main() -> ! {
 
 	// Start the initd task.
 	scheduler::PerCoreScheduler::spawn(initd, 0, scheduler::task::NORMAL_PRIO, 0, USER_STACK_SIZE);
-
 	let core_scheduler = core_scheduler();
+	
 	// Run the scheduler loop.
 	core_scheduler.run();
 }

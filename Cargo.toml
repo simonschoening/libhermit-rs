@@ -94,6 +94,9 @@ qemu-exit = "1.0"
 git = "https://github.com/hermitcore/rust-aarch64"
 default-features = false
 
+[target.'cfg(target_arch = "riscv64")'.dependencies.riscv]
+version = "0.6.0"
+
 # The development profile, used for `cargo build`.
 [profile.dev]
 opt-level = 1      # controls the `--opt-level` the compiler builds with

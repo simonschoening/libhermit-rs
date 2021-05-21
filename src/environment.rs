@@ -21,6 +21,12 @@ pub use crate::arch::aarch64::kernel::{
 	get_tls_start, is_single_kernel, is_uhyve,
 };
 
+#[cfg(target_arch = "riscv64")]
+pub use crate::arch::riscv::kernel::{
+	get_base_address, get_cmdline, get_cmdsize, get_image_size, get_tls_filesz, get_tls_memsz,
+	get_tls_start, is_single_kernel, is_uhyve,
+};
+
 use crate::util;
 use alloc::string::String;
 use alloc::vec::Vec;

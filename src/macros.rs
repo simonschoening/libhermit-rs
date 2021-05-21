@@ -54,7 +54,7 @@ macro_rules! switch_to_kernel {
 	}
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 macro_rules! switch_to_kernel {
 	() => {};
 }
@@ -75,7 +75,7 @@ macro_rules! switch_to_user {
 	}
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 macro_rules! switch_to_user {
 	() => {};
 }
@@ -114,7 +114,7 @@ macro_rules! kernel_function {
 	}};
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 macro_rules! kernel_function {
 	($f:ident($($x:tt)*)) => {{
 		$f($($x)*)

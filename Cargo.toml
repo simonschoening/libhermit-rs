@@ -95,4 +95,7 @@ debug = false
 rpath = false
 lto = false
 debug-assertions = false
-# panic = "abort"
+#panic = "abort"
+
+[patch.crates-io]
+riscv = { git = "https://github.com/simonschoening/riscv.git" }

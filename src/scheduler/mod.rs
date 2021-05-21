@@ -518,11 +518,22 @@ impl PerCoreScheduler {
 				// Finally save our current context and restore the context of the new task.
 				if is_idle || Rc::ptr_eq(&self.current_task, &self.fpu_owner) {
 					unsafe {
+						#[cfg(not(target_arch = "riscv64"))]
 						switch_to_fpu_owner(last_stack_pointer, new_stack_pointer.as_usize());
+						#[cfg(target_arch = "riscv64")]
+						panic!("switch_to_fpu_owner not implemented");
 					}
 				} else {
 					unsafe {
+						// debug!("last_stack_pointer addr {:p}", last_stack_pointer);
+						// let state = last_stack_pointer as *mut crate::arch::riscv::kernel::scheduler::State;
+						// debug!("state: {:#X?}", *state);
+						// let state_new = new_stack_pointer.as_mut_ptr::<crate::arch::riscv::kernel::scheduler::State>();
+						// debug!("state_new addr: {:p}", state_new);
+						// debug!("state_new: {:#X?}", *state_new);
+						// debug!("switch_to_task: {:p}", switch_to_task as *const ());
 						switch_to_task(last_stack_pointer, new_stack_pointer.as_usize());
+						//panic!("switch_to_task not implemented");
 					}
 				}
 			}

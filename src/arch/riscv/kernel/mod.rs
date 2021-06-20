@@ -13,26 +13,37 @@ pub mod processor;
 pub mod scheduler;
 pub mod serial;
 mod start;
-pub mod stubs;
+mod sbi;
 pub mod systemtime;
 
 use crate::arch::riscv::kernel::percore::*;
 use crate::arch::riscv::kernel::serial::SerialPort;
-pub use crate::arch::riscv::kernel::stubs::*;
+use crate::arch::riscv::kernel::processor::lsb;
 pub use crate::arch::riscv::kernel::systemtime::get_boot_time;
 use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
+use crate::arch::riscv::mm::physicalmem;
+use crate::arch::riscv::mm::paging;
 use crate::config::*;
 use crate::environment;
 use crate::kernel_message_buffer;
 use crate::synch::spinlock::Spinlock;
-use core::ptr;
+use core::{intrinsics, ptr, mem};
 use core::fmt;
+use riscv::register::{sstatus, fcsr};
+use crate::scheduler::CoreId;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 
 const SERIAL_PORT_BAUDRATE: u32 = 115200;
 const BOOTINFO_MAGIC_NUMBER: u32 = 0xC0DE_CAFEu32;
 
 static mut COM1: SerialPort = SerialPort::new(0x9000000);
 static CPU_ONLINE: Spinlock<u32> = Spinlock::new(0);
+
+// Used to store information about available harts. The index of the hart in the vector
+// represents its CpuId and does not need to match its hart_id
+pub static mut HARTS_AVAILABLE: Vec<usize> = Vec::new();
+
 
 #[repr(C)]
 struct BootInfo {
@@ -63,6 +74,8 @@ struct BootInfo {
 	pub hcgateway: [u8; 4],
 	pub hcmask: [u8; 4],
 	pub timebase_freq: u64,
+	pub mem_base: u64,
+	pub hart_mask: u64,
 }
 
 impl fmt::Debug for BootInfo {
@@ -97,7 +110,9 @@ impl fmt::Debug for BootInfo {
 		writeln!(f, "uartport 0x{:x}", self.uartport)?;
 		writeln!(f, "single_kernel {}", self.single_kernel)?;
 		writeln!(f, "uhyve {}", self.uhyve)?;
-		writeln!(f, "timebase_freq {}", self.timebase_freq)
+		writeln!(f, "timebase_freq {}", self.timebase_freq)?;
+		writeln!(f, "mem_base {}", self.mem_base)?;
+		writeln!(f, "hart_mask {}", self.hart_mask)
 	}
 }
 
@@ -120,8 +135,14 @@ pub fn get_mbinfo() -> usize {
 	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).mb_info) as usize }
 }
 
+#[cfg(feature = "smp")]
 pub fn get_processor_count() -> u32 {
-	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).cpu_online) }
+	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).cpu_online) as u32 }
+}
+
+#[cfg(not(feature = "smp"))]
+pub fn get_processor_count() -> u32 {
+	1
 }
 
 pub fn get_base_address() -> VirtAddr {
@@ -142,8 +163,8 @@ pub fn get_tls_memsz() -> usize {
 
 /// Whether HermitCore is running under the "uhyve" hypervisor.
 pub fn is_uhyve() -> bool {
-	//unsafe { core::ptr::read_volatile(&(*BOOT_INFO).uhyve) != 0 }
-	false
+	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).uhyve) != 0 }
+	//false
 }
 
 /// Whether HermitCore is running alone (true) or side-by-side to Linux in Multi-Kernel mode (false).
@@ -161,6 +182,18 @@ pub fn get_cmdline() -> VirtAddr {
 
 pub fn get_timebase_freq() -> u64 {
 	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).timebase_freq) as u64 }
+}
+
+pub fn get_mem_base() -> PhysAddr {
+	PhysAddr(unsafe { core::ptr::read_volatile(&(*BOOT_INFO).mem_base) })
+}
+
+pub fn get_hart_mask() -> u64 {
+	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).hart_mask) }
+}
+
+pub fn get_current_boot_id() -> u32 {
+	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).current_boot_id) }
 }
 
 /// Earliest initialization function called by the Boot Processor.
@@ -206,6 +239,8 @@ pub fn boot_processor_init() {
 	crate::mm::print_information();
 	environment::init();
 
+	irq::install();
+	
 	/*processor::detect_features();
 	processor::configure();
 
@@ -274,6 +309,7 @@ pub fn boot_processor_init() {
 	} */
 
 	finish_processor_init();
+	irq::enable();
 }
 
 /// Boots all available Application Processors on bare-metal or QEMU.
@@ -282,9 +318,17 @@ pub fn boot_application_processors() {
 	// Nothing to do here yet.
 }
 
+extern "C" {
+	fn _start(hart_id: usize, boot_info: &'static mut BootInfo) -> !;
+}
+
+
 /// Application Processor initialization
 pub fn application_processor_init() {
+	//processor::halt();
 	percore::init();
+	paging::init_application_processor();
+	irq::install();
 	/*processor::configure();
 	gdt::add_current_core();
 	idt::install();
@@ -292,11 +336,54 @@ pub fn application_processor_init() {
 	apic::init_local_apic();
 	irq::enable();*/
 	finish_processor_init();
+	irq::enable();
 }
 
 fn finish_processor_init() {
-	debug!("Initialized Processor");
+	unsafe{
+		sstatus::set_fs(sstatus::FS::Initial);
+		//fcsr::clear_flags();
+        //fcsr::set_rounding_mode(fcsr::RoundingMode::RoundToNearestEven);
 
+		asm!(
+			"fmv.s.x	f0, zero",
+			"fmv.s.x	f1, zero",
+			"fmv.s.x	f2, zero",
+			"fmv.s.x	f3, zero",
+			"fmv.s.x	f4, zero",
+			"fmv.s.x	f5, zero",
+			"fmv.s.x	f6, zero",
+			"fmv.s.x	f7, zero",
+			"fmv.s.x	f8, zero",
+			"fmv.s.x	f9, zero",
+			"fmv.s.x	f10, zero",
+			"fmv.s.x	f11, zero",
+			"fmv.s.x	f12, zero",
+			"fmv.s.x	f13, zero",
+			"fmv.s.x	f14, zero",
+			"fmv.s.x	f15, zero",
+			"fmv.s.x	f16, zero",
+			"fmv.s.x	f17, zero",
+			"fmv.s.x	f18, zero",
+			"fmv.s.x	f19, zero",
+			"fmv.s.x	f20, zero",
+			"fmv.s.x	f21, zero",
+			"fmv.s.x	f22, zero",
+			"fmv.s.x	f23, zero",
+			"fmv.s.x	f24, zero",
+			"fmv.s.x	f25, zero",
+			"fmv.s.x	f26, zero",
+			"fmv.s.x	f27, zero",
+			"fmv.s.x	f28, zero",
+			"fmv.s.x	f29, zero",
+			"fmv.s.x	f30, zero",
+			"fmv.s.x	f31, zero",
+			"csrw	fcsr, 0",
+		);
+		
+	}
+	info!("FCSR: {:?}", fcsr::read());
+	info!("SSTATUS FS: {:?}", sstatus::read().fs());
 	/*if environment::is_uhyve() {
 		// uhyve does not use apic::detect_from_acpi and therefore does not know the number of processors and
 		// their APIC IDs in advance.
@@ -311,7 +398,53 @@ fn finish_processor_init() {
 
 	// This triggers apic::boot_application_processors (bare-metal/QEMU) or uhyve
 	// to initialize the next processor.
-	*CPU_ONLINE.lock() += 1;
+	// This triggers apic::boot_application_processors (bare-metal/QEMU) or uhyve
+	// to initialize the next processor.
+
+	let current_hart_id = get_current_boot_id() as usize;
+
+	unsafe {
+		// Add hart to HARTS_AVAILABLE, the hart id is stored in current_boot_id
+		HARTS_AVAILABLE.push(current_hart_id);
+		info!("Initialized CPU with hart_id {}", HARTS_AVAILABLE[percore::core_id() as usize]);
+	}
+
+	crate::scheduler::add_current_core();
+
+	// Remove current hart from the hart_mask
+	let new_hart_mask = get_hart_mask() & (u64::MAX - (1 << current_hart_id));
+	unsafe {
+		core::ptr::write_volatile(
+			&mut (*BOOT_INFO).hart_mask,
+			new_hart_mask,
+		);
+	}
+
+	let next_hart_index = lsb(new_hart_mask);
+
+	if let Some(next_hart_id) = next_hart_index{
+		// The current processor already needs to prepare the processor variables for a possible next processor.
+		init_next_processor_variables(core_id() + 1);
+
+		info!("Starting CPU {} with hart_id {}", core_id() + 1, next_hart_id);
+
+		// Changing cpu_online will cause uhyve to start the next processor
+		unsafe {
+			let _ = intrinsics::atomic_xadd(&mut (*BOOT_INFO).cpu_online as *mut u32, 1);
+
+			//When running bare-metal/QEMU we use the firmware to start the next hart
+			if !is_uhyve() {
+				let ret = sbi::sbi_hart_start(next_hart_id as usize, _start as *const () as usize, BOOT_INFO as usize);
+				info!("sbi_hart_start: {:?}", ret);
+			}
+		}
+	}
+	else {
+		info!("All processors are initialized");
+		unsafe {
+			let _ = intrinsics::atomic_xadd(&mut (*BOOT_INFO).cpu_online as *mut u32, 1);
+		}
+	}
 }
 
 pub fn network_adapter_init() -> i32 {
@@ -320,3 +453,30 @@ pub fn network_adapter_init() -> i32 {
 }
 
 pub fn print_statistics() {}
+
+/// Initialize the required start.rs variables for the next CPU to be booted.
+pub fn init_next_processor_variables(core_id: CoreId) {
+	// Allocate stack and PerCoreVariables structure for the CPU and pass the addresses.
+	// Keep the stack executable to possibly support dynamically generated code on the stack (see https://security.stackexchange.com/a/47825).
+	let stack = physicalmem::allocate(KERNEL_STACK_SIZE).expect("Failed to allocate boot stack for new core");
+	let mut boxed_percore = Box::new(PerCoreVariables::new(core_id));
+	//let boxed_irq = Box::new(IrqStatistics::new());
+	//let boxed_irq_raw = Box::into_raw(boxed_irq);
+
+	unsafe {
+		//IRQ_COUNTERS.insert(core_id, &(*boxed_irq_raw));
+		//boxed_percore.irq_statistics = PerCoreVariable::new(boxed_irq_raw);
+
+		core::ptr::write_volatile(&mut (*BOOT_INFO).current_stack_address, stack.as_u64());
+		core::ptr::write_volatile(
+			&mut (*BOOT_INFO).current_percore_address,
+			Box::into_raw(boxed_percore) as u64,
+		);
+
+		info!(
+			"Initialize per core data at 0x{:x} (size {} bytes)",
+			core::ptr::read_volatile(&(*BOOT_INFO).current_percore_address),
+			mem::size_of::<PerCoreVariables>()
+		);
+	}
+}

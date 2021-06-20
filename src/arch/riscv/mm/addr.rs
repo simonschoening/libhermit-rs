@@ -354,7 +354,17 @@ impl VirtAddr {
 
     /// Offset within the 2 MiB page.
     pub fn large_page_offset(self) -> u64 {
-        self.0 & (LARGE_PAGE_SIZE as u64 - 1)
+        self.0 & (MEGA_PAGE_SIZE as u64 - 1)
+    }
+
+    /// Offset within the 1 GiB page.
+    pub fn giga_page_offset(self) -> u64 {
+        self.0 & (GIGA_PAGE_SIZE as u64 - 1)
+    }
+
+    /// Offset within the 512 GiB page.
+    pub fn tera_page_offset(self) -> u64 {
+        self.0 & (TERA_PAGE_SIZE as u64 - 1)
     }
 
     /// Return address of nearest 4 KiB page (lower or equal than self).
@@ -364,7 +374,17 @@ impl VirtAddr {
 
     /// Return address of nearest 2 MiB page (lower or equal than self).
     pub fn align_down_to_large_page(self) -> Self {
-        self.align_down(LARGE_PAGE_SIZE as u64)
+        self.align_down(MEGA_PAGE_SIZE as u64)
+    }
+
+    /// Return address of nearest 1 GiB page (lower or equal than self).
+    pub fn align_down_to_giga_page(self) -> Self {
+        self.align_down(GIGA_PAGE_SIZE as u64)
+    }
+
+    /// Return address of nearest 512 GiB page (lower or equal than self).
+    pub fn align_down_to_tera_page(self) -> Self {
+        self.align_down(TERA_PAGE_SIZE as u64)
     }
 
     /// Return address of nearest 4 KiB page (higher or equal than self).
@@ -374,7 +394,17 @@ impl VirtAddr {
 
     /// Return address of nearest 2 MiB page (higher or equal than self).
     pub fn align_up_to_large_page(self) -> Self {
-        self.align_up(LARGE_PAGE_SIZE as u64)
+        self.align_up(MEGA_PAGE_SIZE as u64)
+    }
+
+    /// Return address of nearest 1 GiB page (higher or equal than self).
+    pub fn align_up_to_giga_page(self) -> Self {
+        self.align_up(GIGA_PAGE_SIZE as u64)
+    }
+
+    /// Return address of nearest 512 GiB page (higher or equal than self).
+    pub fn align_up_to_tera_page(self) -> Self {
+        self.align_up(TERA_PAGE_SIZE as u64)
     }
 
     /// Is this address aligned to a 4 KiB page?
@@ -384,7 +414,17 @@ impl VirtAddr {
 
     /// Is this address aligned to a 2 MiB page?
     pub fn is_large_page_aligned(self) -> bool {
-        self.align_down(LARGE_PAGE_SIZE as u64) == self
+        self.align_down(MEGA_PAGE_SIZE as u64) == self
+    }
+
+    /// Is this address aligned to a 1 GiB page?
+    pub fn is_giga_page_aligned(self) -> bool {
+        self.align_down(GIGA_PAGE_SIZE as u64) == self
+    }
+
+    /// Is this address aligned to a 512 GiB page?
+    pub fn is_tera_page_aligned(self) -> bool {
+        self.align_down(TERA_PAGE_SIZE as u64) == self
     }
 
     /// Is this address aligned to `align`?
@@ -658,5 +698,11 @@ pub const BASE_PAGE_SHIFT: usize = 12;
 /// Size of a base page (4 KiB)
 pub const BASE_PAGE_SIZE: usize = 4096;
 
-/// Size of a large page (2 MiB)
-pub const LARGE_PAGE_SIZE: usize = 1024 * 1024 * 2;
+/// Size of a mega page (2 MiB)
+pub const MEGA_PAGE_SIZE: usize = 1024 * 1024 * 2;
+
+/// Size of a giga page (1 GiB)
+pub const GIGA_PAGE_SIZE: usize = 1024 * 1024 * 1024;
+
+/// Size of a tera page (512 GiB)
+pub const TERA_PAGE_SIZE: usize = 1024 * 1024 * 1024 * 512;

@@ -6,9 +6,13 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+<<<<<<< HEAD
 #![allow(clippy::result_unit_err)]
 
 #[cfg(all(not(feature = "newlib"), feature = "pci", target_arch = "x86_64"))]
+=======
+#[cfg(all(not(feature = "newlib"), any(target_arch = "x86_64", target_arch = "riscv64")))]
+>>>>>>> 48c76375 (Prepare network support for riscv)
 use crate::drivers::net::*;
 use crate::environment;
 #[cfg(feature = "newlib")]
@@ -53,6 +57,7 @@ pub fn init() {
 	unsafe {
 		// We know that HermitCore has successfully initialized a network interface.
 		// Now check if we can load a more specific SyscallInterface to make use of networking.
+		#[cfg(not(target_arch = "riscv64"))]
 		if environment::is_proxy() {
 			panic!("Currently, we don't support the proxy mode!");
 		} else if environment::is_uhyve() {
@@ -152,13 +157,26 @@ pub fn sys_rx_buffer_consumed(handle: usize) -> Result<(), ()> {
 	kernel_function!(__sys_rx_buffer_consumed(handle))
 }
 
+<<<<<<< HEAD
 #[cfg(all(not(feature = "newlib"), feature = "pci", target_arch = "x86_64"))]
+=======
+#[cfg(all(not(feature = "newlib"), any(target_arch = "x86_64", target_arch = "riscv64")))]
+fn __sys_netwait(handle: usize, millis: Option<u64>) {
+	netwait(handle, millis)
+}
+
+#[cfg(all(not(feature = "newlib"), any(target_arch = "x86_64", target_arch = "riscv64")))]
+>>>>>>> 48c76375 (Prepare network support for riscv)
 #[no_mangle]
 pub extern "C" fn sys_netwait() {
 	kernel_function!(netwait());
 }
 
+<<<<<<< HEAD
 #[cfg(all(not(feature = "newlib"), feature = "pci", target_arch = "x86_64"))]
+=======
+#[cfg(all(not(feature = "newlib"), any(target_arch = "x86_64", target_arch = "riscv64")))]
+>>>>>>> 48c76375 (Prepare network support for riscv)
 #[no_mangle]
 pub extern "C" fn sys_set_network_polling_mode(value: bool) {
 	kernel_function!(set_polling_mode(value));

@@ -52,9 +52,6 @@ pub use crate::arch::aarch64::kernel::systemtime::get_boot_time;
 pub use crate::arch::riscv::*;
 
 #[cfg(target_arch = "riscv64")]
-pub use crate::arch::riscv::kernel::stubs::{set_oneshot_timer, wakeup_core};
-
-#[cfg(target_arch = "riscv64")]
 pub use crate::arch::riscv::kernel::{
 	application_processor_init, boot_application_processors, boot_processor_init,
 	get_processor_count, message_output_init, output_message_buf, output_message_byte,
@@ -73,10 +70,19 @@ pub use crate::arch::riscv::kernel::scheduler;
 pub use crate::arch::riscv::kernel::processor;
 
 #[cfg(target_arch = "riscv64")]
+pub use crate::arch::riscv::kernel::processor::{set_oneshot_timer, wakeup_core};
+
+#[cfg(target_arch = "riscv64")]
 pub use crate::arch::riscv::kernel::irq;
 
 #[cfg(target_arch = "riscv64")]
 pub use crate::arch::riscv::kernel::systemtime::get_boot_time;
+
+#[cfg(target_arch = "riscv64")]
+pub use crate::arch::riscv::kernel::scheduler::switch_to_task;
+
+#[cfg(target_arch = "riscv64")]
+pub use crate::arch::riscv::kernel::scheduler::switch_to_task as switch_to_fpu_owner;
 
 
 #[cfg(target_arch = "x86_64")]
@@ -110,7 +116,7 @@ pub fn switch_to_task(_old_stack: *mut usize, _new_stack: usize) {}
 #[cfg(test)]
 pub fn switch_to_fpu_owner(_old_stack: *mut usize, _new_stack: usize) {}
 
-#[cfg(not(test))]
+#[cfg(not(any(test, target_arch = "riscv64")))]
 extern "C" {
 	pub fn switch_to_task(old_stack: *mut usize, new_stack: usize);
 	pub fn switch_to_fpu_owner(old_stack: *mut usize, new_stack: usize);

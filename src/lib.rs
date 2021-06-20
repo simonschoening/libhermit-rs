@@ -357,11 +357,13 @@ fn boot_processor_main() -> ! {
 		loop {} /* Compiles up to here - loop prevents linker errors */
 	}
 	arch::boot_processor_init();
+	#[cfg(not(target_arch = "riscv64"))]
 	scheduler::add_current_core();
 
 	if environment::is_single_kernel() && !environment::is_uhyve() {
 		arch::boot_application_processors();
 	}
+
 
 	#[cfg(feature = "smp")]
 	synch_all_cores();
@@ -379,6 +381,8 @@ fn boot_processor_main() -> ! {
 	scheduler::PerCoreScheduler::spawn(initd, 0, scheduler::task::NORMAL_PRIO, 0, USER_STACK_SIZE);
 	let core_scheduler = core_scheduler();
 	
+	trace!("core_scheduler: {:p}", &core_scheduler);
+
 	// Run the scheduler loop.
 	core_scheduler.run();
 }
@@ -387,6 +391,7 @@ fn boot_processor_main() -> ! {
 #[cfg(all(target_os = "hermit", feature = "smp"))]
 fn application_processor_main() -> ! {
 	arch::application_processor_init();
+	#[cfg(not(target_arch = "riscv64"))]
 	scheduler::add_current_core();
 
 	info!("Entering idle loop for application processor");
@@ -394,6 +399,8 @@ fn application_processor_main() -> ! {
 	synch_all_cores();
 
 	let core_scheduler = core_scheduler();
+
+	trace!("core_scheduler: {:p}", &core_scheduler);
 	// Run the scheduler loop.
 	core_scheduler.run();
 }

@@ -353,6 +353,16 @@ impl PerCoreScheduler {
 			.as_u64();
 	}
 
+	#[cfg(target_arch = "riscv64")]
+	pub fn set_current_kernel_stack(&self) {
+		let current_task_borrowed = self.current_task.borrow();
+
+		set_kernel_stack((current_task_borrowed.stacks.get_kernel_stack()
+		+ current_task_borrowed.stacks.get_kernel_stack_size()
+		- 0x10u64)
+		.as_u64());
+	}
+
 	/// Save the FPU context for the current FPU owner and restore it for the current task,
 	/// which wants to use the FPU now.
 	pub fn fpu_switch(&mut self) {
@@ -420,6 +430,7 @@ impl PerCoreScheduler {
 		let backoff = Backoff::new();
 
 		loop {
+			trace!("Sched");
 			irq::disable();
 			if !self.scheduler() {
 				backoff.reset()
@@ -432,6 +443,7 @@ impl PerCoreScheduler {
 			// This atomic operation guarantees that we cannot miss a wakeup interrupt in between.
 			if !wakeup_tasks {
 				if backoff.is_completed() {
+					trace!("Off");
 					irq::enable_and_wait();
 				} else {
 					irq::enable();
@@ -533,8 +545,10 @@ impl PerCoreScheduler {
 					unsafe {
 						#[cfg(not(target_arch = "riscv64"))]
 						switch_to_fpu_owner(last_stack_pointer, new_stack_pointer.as_usize());
+						//#[cfg(target_arch = "riscv64")]
+						//warn!("switch_to_fpu_owner not implemented");
 						#[cfg(target_arch = "riscv64")]
-						panic!("switch_to_fpu_owner not implemented");
+						switch_to_task(last_stack_pointer, new_stack_pointer.as_usize());
 					}
 				} else {
 					unsafe {

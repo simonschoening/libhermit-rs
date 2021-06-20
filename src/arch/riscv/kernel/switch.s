@@ -6,18 +6,20 @@
 // copied, modified, or distributed except according to those terms.
 
 .section .text
-.global switch_to_task
-.global switch_to_fpu_owner
+.global switch_to_task_fp_clean
+.global switch_to_task_fp_dirty
 .global task_start
 .extern task_entry
 // .extern set_current_kernel_stack
 
+
 .align 16
-switch_to_task:
+// This function should only be called if the fp registers are saved
+switch_to_task_fp_clean:
 	// a0 = old_stack => the address to store the old rsp
 	// a1 = new_stack => stack pointer of the new task
 	
-	addi sp, sp, -(31*8)
+	addi sp, sp, -(64*8)
 	sd x31, (8*30)(sp)
 	sd x30, (8*29)(sp)
 	sd x29, (8*28)(sp)
@@ -46,19 +48,95 @@ switch_to_task:
 	sd x6, (8*5)(sp)
 	sd x5, (8*4)(sp)
 	sd x4, (8*3)(sp)
-	sd x3, (8*2)(sp)
-	sd x2, (8*1)(sp)
+	//sd x3, (8*2)(sp)
+	//sd x2, (8*1)(sp)
 	sd x1, (8*0)(sp)
+
+	//Store floating point registers 
+	//TODO: Save only when changed
+	# fsd f0, (8*31)(sp)
+	# fsd f1, (8*32)(sp)
+	# fsd f2, (8*33)(sp)
+	# fsd f3, (8*34)(sp)
+	# fsd f4, (8*35)(sp)
+	# fsd f5, (8*36)(sp)
+	# fsd f6, (8*37)(sp)
+	# fsd f7, (8*38)(sp)
+	# fsd f8, (8*39)(sp)
+	# fsd f9, (8*40)(sp)
+	# fsd f10, (8*41)(sp)
+	# fsd f11, (8*42)(sp)
+	# fsd f12, (8*43)(sp)
+	# fsd f13, (8*44)(sp)
+	# fsd f14, (8*45)(sp)
+	# fsd f15, (8*46)(sp)
+	# fsd f16, (8*47)(sp)
+	# fsd f17, (8*48)(sp)
+	# fsd f18, (8*49)(sp)
+	# fsd f19, (8*50)(sp)
+	# fsd f20, (8*51)(sp)
+	# fsd f21, (8*52)(sp)
+	# fsd f22, (8*53)(sp)
+	# fsd f23, (8*54)(sp)
+	# fsd f24, (8*55)(sp)
+	# fsd f25, (8*56)(sp)
+	# fsd f26, (8*57)(sp)
+	# fsd f27, (8*58)(sp)
+	# fsd f28, (8*59)(sp)
+	# fsd f29, (8*60)(sp)
+	# fsd f30, (8*61)(sp)
+	# fsd f31, (8*62)(sp)
+	# frcsr t0
+	# sd t0, (8*63)(sp)
 
     // Store current stack pointer with saved context in `_dst`.
 	sd sp, (0)(a0)
 	// Set stack pointer to supplied `_src`.
 	mv sp, a1
 
+	//set current kernel stack
+	call set_current_kernel_stack
+
+	// Restore fp regs
+	fld f0, (8*31)(sp)
+	fld f1, (8*32)(sp)
+	fld f2, (8*33)(sp)
+	fld f3, (8*34)(sp)
+	fld f4, (8*35)(sp)
+	fld f5, (8*36)(sp)
+	fld f6, (8*37)(sp)
+	fld f7, (8*38)(sp)
+	fld f8, (8*39)(sp)
+	fld f9, (8*40)(sp)
+	fld f10, (8*41)(sp)
+	fld f11, (8*42)(sp)
+	fld f12, (8*43)(sp)
+	fld f13, (8*44)(sp)
+	fld f14, (8*45)(sp)
+	fld f15, (8*46)(sp)
+	fld f16, (8*47)(sp)
+	fld f17, (8*48)(sp)
+	fld f18, (8*49)(sp)
+	fld f19, (8*50)(sp)
+	fld f20, (8*51)(sp)
+	fld f21, (8*52)(sp)
+	fld f22, (8*53)(sp)
+	fld f23, (8*54)(sp)
+	fld f24, (8*55)(sp)
+	fld f25, (8*56)(sp)
+	fld f26, (8*57)(sp)
+	fld f27, (8*58)(sp)
+	fld f28, (8*59)(sp)
+	fld f29, (8*60)(sp)
+	fld f30, (8*61)(sp)
+	fld f31, (8*62)(sp)
+	ld t0, (8*63)(sp)
+	fscsr t0
+
 	// Restore context
 	ld x1, (8*0)(sp)
-	ld x2, (8*1)(sp)
-	ld x3, (8*2)(sp)
+	//ld x2, (8*1)(sp)
+	//ld x3, (8*2)(sp)
 	ld x4, (8*3)(sp)
 	ld x5, (8*4)(sp)
 	ld x6, (8*5)(sp)
@@ -87,19 +165,19 @@ switch_to_task:
 	ld x29, (8*28)(sp)
 	ld x30, (8*29)(sp)
 	ld x31, (8*30)(sp)
-	addi sp, sp, (31*8)
+
+	addi sp, sp, (64*8)
 
 	ret
 
-/// The function triggers a context switch to an idle task or
-/// a task, which is alread owner of the FPU.
-/// Consequently  the kernel don't set the task switched flag.
+
 .align 16
-switch_to_fpu_owner:
+// This function should only be called if the fp registers are saved
+switch_to_task_fp_dirty:
 	// a0 = old_stack => the address to store the old rsp
 	// a1 = new_stack => stack pointer of the new task
-
-	addi sp, sp, -(31*8)
+	
+	addi sp, sp, -(64*8)
 	sd x31, (8*30)(sp)
 	sd x30, (8*29)(sp)
 	sd x29, (8*28)(sp)
@@ -128,19 +206,102 @@ switch_to_fpu_owner:
 	sd x6, (8*5)(sp)
 	sd x5, (8*4)(sp)
 	sd x4, (8*3)(sp)
-	sd x3, (8*2)(sp)
-	sd x2, (8*1)(sp)
+	//sd x3, (8*2)(sp)
+	//sd x2, (8*1)(sp)
 	sd x1, (8*0)(sp)
+
+	//Store floating point registers 
+	//TODO: Save only when changed
+	fsd f0, (8*31)(sp)
+	fsd f1, (8*32)(sp)
+	fsd f2, (8*33)(sp)
+	fsd f3, (8*34)(sp)
+	fsd f4, (8*35)(sp)
+	fsd f5, (8*36)(sp)
+	fsd f6, (8*37)(sp)
+	fsd f7, (8*38)(sp)
+	fsd f8, (8*39)(sp)
+	fsd f9, (8*40)(sp)
+	fsd f10, (8*41)(sp)
+	fsd f11, (8*42)(sp)
+	fsd f12, (8*43)(sp)
+	fsd f13, (8*44)(sp)
+	fsd f14, (8*45)(sp)
+	fsd f15, (8*46)(sp)
+	fsd f16, (8*47)(sp)
+	fsd f17, (8*48)(sp)
+	fsd f18, (8*49)(sp)
+	fsd f19, (8*50)(sp)
+	fsd f20, (8*51)(sp)
+	fsd f21, (8*52)(sp)
+	fsd f22, (8*53)(sp)
+	fsd f23, (8*54)(sp)
+	fsd f24, (8*55)(sp)
+	fsd f25, (8*56)(sp)
+	fsd f26, (8*57)(sp)
+	fsd f27, (8*58)(sp)
+	fsd f28, (8*59)(sp)
+	fsd f29, (8*60)(sp)
+	fsd f30, (8*61)(sp)
+	fsd f31, (8*62)(sp)
+	frcsr t0
+	sd t0, (8*63)(sp)
 
     // Store current stack pointer with saved context in `_dst`.
 	sd sp, (0)(a0)
 	// Set stack pointer to supplied `_src`.
 	mv sp, a1
 
+	//set current kernel stack
+	call set_current_kernel_stack
+
+	// Restore fp regs
+	fld f0, (8*31)(sp)
+	fld f1, (8*32)(sp)
+	fld f2, (8*33)(sp)
+	fld f3, (8*34)(sp)
+	fld f4, (8*35)(sp)
+	fld f5, (8*36)(sp)
+	fld f6, (8*37)(sp)
+	fld f7, (8*38)(sp)
+	fld f8, (8*39)(sp)
+	fld f9, (8*40)(sp)
+	fld f10, (8*41)(sp)
+	fld f11, (8*42)(sp)
+	fld f12, (8*43)(sp)
+	fld f13, (8*44)(sp)
+	fld f14, (8*45)(sp)
+	fld f15, (8*46)(sp)
+	fld f16, (8*47)(sp)
+	fld f17, (8*48)(sp)
+	fld f18, (8*49)(sp)
+	fld f19, (8*50)(sp)
+	fld f20, (8*51)(sp)
+	fld f21, (8*52)(sp)
+	fld f22, (8*53)(sp)
+	fld f23, (8*54)(sp)
+	fld f24, (8*55)(sp)
+	fld f25, (8*56)(sp)
+	fld f26, (8*57)(sp)
+	fld f27, (8*58)(sp)
+	fld f28, (8*59)(sp)
+	fld f29, (8*60)(sp)
+	fld f30, (8*61)(sp)
+	fld f31, (8*62)(sp)
+	ld t0, (8*63)(sp)
+	fscsr t0
+
+	//set fs to clean
+	li      t0, 1<<13
+    csrrs   zero, sstatus, t0
+	slli	t0, t0, 1
+	csrrc   zero, sstatus, t0
+
+
 	// Restore context
 	ld x1, (8*0)(sp)
-	ld x2, (8*1)(sp)
-	ld x3, (8*2)(sp)
+	//ld x2, (8*1)(sp)
+	//ld x3, (8*2)(sp)
 	ld x4, (8*3)(sp)
 	ld x5, (8*4)(sp)
 	ld x6, (8*5)(sp)
@@ -169,7 +330,8 @@ switch_to_fpu_owner:
 	ld x29, (8*28)(sp)
 	ld x30, (8*29)(sp)
 	ld x31, (8*30)(sp)
-	addi sp, sp, (31*8)
+
+	addi sp, sp, (64*8)
 
 	ret
 

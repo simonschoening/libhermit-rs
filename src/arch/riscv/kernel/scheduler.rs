@@ -8,8 +8,13 @@
 
 //! Architecture dependent interface to initialize a task
 
+use alloc::alloc::{alloc, dealloc, Layout};
+use core::convert::TryInto;
+use core::{mem, ptr};
+
 use crate::arch::riscv::kernel::percore::*;
 use crate::arch::riscv::kernel::processor;
+use crate::arch::riscv::kernel::sbi;
 use crate::arch::riscv::mm::paging::{BasePageSize, PageSize, PageTableEntryFlags};
 use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
 use crate::environment;
@@ -17,7 +22,7 @@ use crate::scheduler::task::{Task, TaskFrame};
 use crate::{DEFAULT_STACK_SIZE, KERNEL_STACK_SIZE};
 use alloc::rc::Rc;
 use core::cell::RefCell;
-use core::{mem, ptr};
+use riscv::register::sstatus;
 
 /* extern "C" {
 	static tls_start: u8;
@@ -89,6 +94,73 @@ pub struct State {
 	x30: usize,
 	/// x31 register
 	x31: usize,
+	
+	/// f0 register
+	f0: u64,
+	/// f1 register
+	f1: u64,
+	/// f2 register
+	f2: u64,
+	/// f3 register
+	f3: u64,
+	/// f4 register
+	f4: u64,
+	/// f5 register
+	f5: u64,
+	/// f6 register
+	f6: u64,
+	/// f7 register
+	f7: u64,
+	/// f8 register
+	f8: u64,
+	/// f9 register
+	f9: u64,
+	/// f10 register
+	f10: u64,
+	/// f11 register
+	f11: u64,
+	/// f12 register
+	f12: u64,
+	/// f13 register
+	f13: u64,
+	/// f14 register
+	f14: u64,
+	/// f15 register
+	f15: u64,
+	/// f16 register
+	f16: u64,
+	/// f17 register
+	f17: u64,
+	/// f18 register
+	f18: u64,
+	/// f19 register
+	f19: u64,
+	/// f20 register
+	f20: u64,
+	/// f21 register
+	f21: u64,
+	/// f22 register
+	f22: u64,
+	/// f23 register
+	f23: u64,
+	/// f24 register
+	f24: u64,
+	/// f25 register
+	f25: u64,
+	/// f26 register
+	f26: u64,
+	/// f27 register
+	f27: u64,
+	/// f28 register
+	f28: u64,
+	/// f29 register
+	f29: u64,
+	/// f30 register
+	f30: u64,
+	/// f31 register
+	f31: u64,
+	/// fcsr register
+	fcsr: usize,
 }
 
 pub struct BootStack {
@@ -120,8 +192,8 @@ impl TaskStacks {
 			align_up!(size, BasePageSize::SIZE)
 		};
 		let total_size = user_stack_size + DEFAULT_STACK_SIZE + KERNEL_STACK_SIZE;
-		//let virt_addr = crate::arch::mm::virtualmem::allocate(total_size + 4 * BasePageSize::SIZE)
-		let virt_addr = crate::arch::mm::virtualmem::allocate(total_size)
+		let virt_addr = crate::arch::mm::virtualmem::allocate(total_size + 4 * BasePageSize::SIZE)
+		//let virt_addr = crate::arch::mm::virtualmem::allocate(total_size)
 			.expect("Failed to allocate Virtual Memory for TaskStacks");
 		let phys_addr = crate::arch::mm::physicalmem::allocate(total_size)
 			.expect("Failed to allocate Physical Memory for TaskStacks");
@@ -137,8 +209,8 @@ impl TaskStacks {
 
 		// map IST0 into the address space
 		crate::arch::mm::paging::map::<BasePageSize>(
-			//virt_addr + BasePageSize::SIZE,
-			virt_addr,
+			virt_addr + BasePageSize::SIZE,
+			//virt_addr,
 			phys_addr,
 			KERNEL_STACK_SIZE / BasePageSize::SIZE,
 			flags,
@@ -146,8 +218,8 @@ impl TaskStacks {
 
 		// map kernel stack into the address space
 		crate::arch::mm::paging::map::<BasePageSize>(
-			//virt_addr + KERNEL_STACK_SIZE + 2 * BasePageSize::SIZE,
-			virt_addr + KERNEL_STACK_SIZE,
+			virt_addr + KERNEL_STACK_SIZE + 2 * BasePageSize::SIZE,
+			//virt_addr + KERNEL_STACK_SIZE,
 			phys_addr + KERNEL_STACK_SIZE,
 			DEFAULT_STACK_SIZE / BasePageSize::SIZE,
 			flags,
@@ -155,8 +227,8 @@ impl TaskStacks {
 
 		// map user stack into the address space
 		crate::arch::mm::paging::map::<BasePageSize>(
-			//virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE + 3 * BasePageSize::SIZE,
-			virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE,
+			virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE + 3 * BasePageSize::SIZE,
+			//virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE,
 			phys_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE,
 			user_stack_size / BasePageSize::SIZE,
 			flags,
@@ -165,8 +237,8 @@ impl TaskStacks {
 		// clear user stack
 		unsafe {
 			ptr::write_bytes(
-				//(virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE + 3 * BasePageSize::SIZE)
-				(virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE)
+				(virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE + 3 * BasePageSize::SIZE)
+				//(virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE)
 					.as_mut_ptr::<u8>(),
 				0xAC,
 				user_stack_size,
@@ -205,8 +277,8 @@ impl TaskStacks {
 		match self {
 			TaskStacks::Boot(_) => VirtAddr::zero(),
 			TaskStacks::Common(stacks) => {
-				//stacks.virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE + 3 * BasePageSize::SIZE
-				stacks.virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE
+				stacks.virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE + 3 * BasePageSize::SIZE
+				//stacks.virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE
 			}
 		}
 	}
@@ -215,8 +287,8 @@ impl TaskStacks {
 		match self {
 			TaskStacks::Boot(stacks) => stacks.stack,
 			TaskStacks::Common(stacks) => {
-				//stacks.virt_addr + KERNEL_STACK_SIZE + 2 * BasePageSize::SIZE
-				stacks.virt_addr + KERNEL_STACK_SIZE
+				stacks.virt_addr + KERNEL_STACK_SIZE + 2 * BasePageSize::SIZE
+				//stacks.virt_addr + KERNEL_STACK_SIZE
 			}
 		}
 	}
@@ -231,8 +303,8 @@ impl TaskStacks {
 	pub fn get_interupt_stack(&self) -> VirtAddr {
 		match self {
 			TaskStacks::Boot(stacks) => stacks.ist0,
-			//TaskStacks::Common(stacks) => stacks.virt_addr + BasePageSize::SIZE,
-			TaskStacks::Common(stacks) => stacks.virt_addr,
+			TaskStacks::Common(stacks) => stacks.virt_addr + BasePageSize::SIZE,
+			//TaskStacks::Common(stacks) => stacks.virt_addr,
 		}
 	}
 
@@ -266,13 +338,13 @@ impl Drop for TaskStacks {
 
 				crate::arch::mm::paging::unmap::<BasePageSize>(
 					stacks.virt_addr,
-					//stacks.total_size / BasePageSize::SIZE + 4,
-					stacks.total_size / BasePageSize::SIZE,
+					stacks.total_size / BasePageSize::SIZE + 4,
+					//stacks.total_size / BasePageSize::SIZE,
 				);
 				crate::arch::mm::virtualmem::deallocate(
 					stacks.virt_addr,
-					//stacks.total_size + 4 * BasePageSize::SIZE,
-					stacks.total_size,
+					stacks.total_size + 4 * BasePageSize::SIZE,
+					//stacks.total_size,
 				);
 				crate::arch::mm::physicalmem::deallocate(stacks.phys_addr, stacks.total_size);
 			}
@@ -282,14 +354,58 @@ impl Drop for TaskStacks {
 
 pub struct TaskTLS {
 	address: VirtAddr,
-	//fs: VirtAddr,
-	//layout: Layout,
+	tp: VirtAddr,
+	layout: Layout,
 }
 
 impl TaskTLS {
 	pub fn new(tls_size: usize) -> Self {
+		// determine the size of tdata (tls without tbss)
+		let tdata_size: usize = environment::get_tls_filesz();
+		// Yes, it does, so we have to allocate TLS memory.
+		// Allocate enough space for the given size and one more variable of type usize, which holds the tls_pointer.
+		let tls_allocation_size = align_up!(tls_size, 32);// + mem::size_of::<usize>();
+		// We allocate in 128 byte granularity (= cache line size) to avoid false sharing
+		let memory_size = align_up!(tls_allocation_size, 128);
+		let layout =
+			Layout::from_size_align(memory_size, 128).expect("TLS has an invalid size / alignment");
+		let ptr = VirtAddr(unsafe { alloc(layout) as u64 });
+
+		// The tls_pointer is the address to the end of the TLS area requested by the task.
+		let tls_pointer = ptr;// + align_up!(tls_size, 32);
+
+		unsafe {
+			// Copy over TLS variables with their initial values.
+			ptr::copy_nonoverlapping(
+				environment::get_tls_start().as_ptr::<u8>(),
+				ptr.as_mut_ptr::<u8>(),
+				tdata_size,
+			);
+
+			ptr::write_bytes(
+				ptr.as_mut_ptr::<u8>()
+					.offset(tdata_size.try_into().unwrap()),
+				0,
+				align_up!(tls_size, 32) - tdata_size,
+			);
+
+			// The x86-64 TLS specification also requires that the tls_pointer can be accessed at fs:0.
+			// This allows TLS variable values to be accessed by "mov rax, fs:0" and a later "lea rdx, [rax+VARIABLE_OFFSET]".
+			// See "ELF Handling For Thread-Local Storage", version 0.20 by Ulrich Drepper, page 12 for details.
+			//
+			// fs:0 is where tls_pointer points to and we have reserved space for a usize value above.
+			//*(tls_pointer.as_mut_ptr::<u64>()) = tls_pointer.as_u64();
+		}
+
+		debug!(
+			"Set up TLS at 0x{:x}, tdata_size 0x{:x}, tls_size 0x{:x}",
+			tls_pointer, tdata_size, tls_size
+		);
+
 		Self {
-			address: VirtAddr::zero(),
+			address: ptr,
+			tp: tls_pointer,
+			layout: layout,
 		}
 	}
 
@@ -297,18 +413,23 @@ impl TaskTLS {
 	pub fn address(&self) -> VirtAddr {
 		self.address
 	}
+
+	#[inline]
+	pub fn get_tp(&self) -> VirtAddr {
+		self.tp
+	}
 }
 
 impl Drop for TaskTLS {
 	fn drop(&mut self) {
-		/*debug!(
-				"Deallocate TLS at 0x{:x} (layout {:?})",
-				self.address, self.layout,
+		debug!(
+			"Deallocate TLS at 0x{:x} (layout {:?})",
+			self.address, self.layout,
 		);
 
 		unsafe {
-				dealloc(self.address.as_mut_ptr::<u8>(), self.layout);
-		}*/
+			dealloc(self.address.as_mut_ptr::<u8>(), self.layout);
+		}
 	}
 }
 
@@ -351,17 +472,25 @@ extern "C" fn task_entry(func: extern "C" fn(usize), arg: usize) {
 	//println!("OKAAAYYY: {:p} , arg: {:?}",((func as usize -31*8 ) as *const crate::arch::riscv::kernel::scheduler::State), arg);
 	//unsafe{debug!("state: {:#X?}", *((func as usize -31*8 ) as *const crate::arch::riscv::kernel::scheduler::State));}
 	//panic!("Not impl");
+	//println!("Task start");
 	func(arg);
+	//println!("Task end");
+
+	switch_to_kernel!();
+
+	// Exit task
+	core_scheduler().exit(0)
+
 }
 
 impl TaskFrame for Task {
 	fn create_stack_frame(&mut self, func: extern "C" fn(usize), arg: usize) {
-		/* // Check if the task (process or thread) uses Thread-Local-Storage.
+		// Check if the task (process or thread) uses Thread-Local-Storage.
 		let tls_size = environment::get_tls_memsz();
 		// check is TLS is already allocated
 		if self.tls.is_none() && tls_size > 0 {
 			self.tls = Some(TaskTLS::new(tls_size))
-		} */
+		}
 
 		unsafe {
 			// Set a marker for debugging at the very top.
@@ -375,9 +504,9 @@ impl TaskFrame for Task {
 			let state = stack.as_mut_ptr::<State>();
 			ptr::write_bytes(stack.as_mut_ptr::<u8>(), 0, mem::size_of::<State>());
 
-			/* if let Some(tls) = &self.tls {
-				(*state).fs = tls.get_fs().as_u64();
-			} */
+			if let Some(tls) = &self.tls {
+				(*state).tp = tls.get_tp().as_usize();
+			}
 			(*state).ra = task_start as usize;
 			(*state).a0 = func as usize;
 			(*state).a1 = arg as usize;
@@ -397,4 +526,43 @@ impl TaskFrame for Task {
 
 extern "C" {
 	fn task_start(func: extern "C" fn(usize), arg: usize, user_stack: u64);
+}
+
+pub fn timer_handler() {
+	//increment_irq_counter(apic::TIMER_INTERRUPT_NUMBER.into());
+	core_scheduler().handle_waiting_tasks();
+	//apic::eoi();
+	core_scheduler().scheduler();
+}
+
+#[cfg(feature = "smp")]
+pub fn wakeup_handler() {
+	debug!("Received Wakeup Interrupt");
+	//increment_irq_counter(WAKEUP_INTERRUPT_NUMBER.into());
+	let core_scheduler = core_scheduler();
+	core_scheduler.check_input();
+	if core_scheduler.is_scheduling() {
+		core_scheduler.scheduler();
+	}
+}
+
+#[inline(never)]
+#[no_mangle]
+pub fn set_current_kernel_stack() {
+	core_scheduler().set_current_kernel_stack();
+}
+
+extern "C" {
+	pub fn switch_to_task_fp_clean(old_stack: *mut usize, new_stack: usize);
+	pub fn switch_to_task_fp_dirty(old_stack: *mut usize, new_stack: usize);
+}
+
+/// Saves the floating point registers when needed and switches task
+pub unsafe fn switch_to_task(old_stack: *mut usize, new_stack: usize) {
+	if sstatus::read().fs() == sstatus::FS::Dirty {
+		switch_to_task_fp_dirty(old_stack, new_stack);
+	}
+	else {
+		switch_to_task_fp_clean(old_stack, new_stack);
+	}	
 }

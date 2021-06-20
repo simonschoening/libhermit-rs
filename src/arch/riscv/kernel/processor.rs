@@ -8,16 +8,16 @@
 use core::sync::atomic::spin_loop_hint;
 
 use riscv::asm::wfi;
-use riscv::register::time;
-use crate::arch::riscv::kernel::get_timebase_freq;
+use crate::arch::riscv::kernel::sbi;
+use riscv::register::{time, sie};
+use crate::arch::riscv::kernel::{get_timebase_freq, is_uhyve};
+use crate::arch::riscv::kernel::HARTS_AVAILABLE;
 use core::convert::TryInto;
+use crate::scheduler::CoreId;
 
-extern "C" {
-	static mut cpu_freq: u32;
-}
-
+/// Only a dummy implementation. The state of the floating point registers are already saved/restored on context switch
 pub struct FPUState {
-	// TODO
+	// dummy
 }
 
 impl FPUState {
@@ -26,11 +26,11 @@ impl FPUState {
 	}
 
 	pub fn restore(&self) {
-		// TODO
+		
 	}
 
 	pub fn save(&self) {
-		// TODO
+		
 	}
 }
 
@@ -57,6 +57,17 @@ pub fn msb(value: u64) -> Option<u64> {
 	}
 }
 
+/// Search the least significant bit, indices start at 0
+#[inline(always)]
+pub fn lsb(value: u64) -> Option<u64> {
+	if value > 0 {
+		let ret: u64 = value.trailing_zeros() as u64;
+		Some(ret)
+	} else {
+		None
+	}
+}
+
 /// The halt function stops the processor until the next interrupt arrives
 pub fn halt() {
 	unsafe {
@@ -68,13 +79,7 @@ pub fn halt() {
 pub fn shutdown() -> ! {
 	info!("Shutting down system");
 	//SBI shutdown
-	unsafe{
-		asm!(
-			"li a7, 0x08",
-			"ecall",
-			options(noreturn)
-		)
-	}
+	sbi::shutdown_legacy()
 }
 
 pub fn get_timer_ticks() -> u64 {
@@ -93,7 +98,7 @@ pub fn get_timestamp() -> u64 {
 }
 
 pub fn supports_1gib_pages() -> bool {
-	false
+	true
 }
 
 /// Delay execution by the given number of microseconds using busy-waiting.
@@ -103,4 +108,29 @@ pub fn udelay(usecs: u64) {
 	while get_timestamp() < end {
 		spin_loop_hint();
 	}
+}
+
+pub fn set_oneshot_timer(wakeup_time: Option<u64>) {
+	if let Some(wt) = wakeup_time {
+		debug!("Starting Timer: {:x}", get_timestamp());
+		unsafe{
+			sie::set_stimer();
+		}
+		let next_time = wt * u64::from(get_frequency());
+		
+		sbi::set_timer(next_time);
+	}
+	else{
+		// Disable the Timer.
+		debug!("Stopping Timer");
+		sbi::set_timer(u64::MAX);
+	}
+}
+
+pub fn wakeup_core(core_to_wakeup: CoreId) {
+	let hart_id =  unsafe{
+		HARTS_AVAILABLE[core_to_wakeup as usize]
+	};
+	debug!("Wakeup core: {} , hart_id: {}", core_to_wakeup, hart_id);
+	sbi::send_ipi(1 << hart_id);
 }

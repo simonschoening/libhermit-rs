@@ -6,11 +6,8 @@
 // copied, modified, or distributed except according to those terms.
 
 use crate::environment;
-
-extern "C" {
-	static mut boot_gtod: u64;
-}
+use crate::arch::riscv::kernel::BOOT_INFO;
 
 pub fn get_boot_time() -> u64 {
-	unsafe { boot_gtod }
+	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).boot_gtod) }
 }

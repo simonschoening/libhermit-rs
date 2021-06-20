@@ -5,43 +5,25 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+// TODO: sifive UART
 use core::ptr;
+use crate::arch::riscv::kernel::sbi;
 
 pub struct SerialPort {
-	port_address: u32,
 }
 
 impl SerialPort {
 	pub const fn new(port_address: u32) -> Self {
-		Self {
-			port_address: port_address,
-		}
+		Self {}
 	}
 
 	pub fn write_byte(&self, byte: u8) {
-		let port = self.port_address as *mut u8;
-
 		// LF newline characters need to be extended to CRLF over a real serial port.
 		if byte == b'\n' {
-			unsafe {
-				asm!("li a0 , '\r'",
-				"li a7, 0x01",
-				"ecall",
-				lateout("a0") _,
-				lateout("a7") _
-			);
-			}
+			sbi::console_putchar('\r' as usize);
 		}
 
-		unsafe {
-			asm!("mv a0 , {byte}",
-				"li a7, 0x01",
-				"ecall",
-				byte = in(reg) byte,
-				lateout("a0") _,
-				lateout("a7") _
-			);
-		}
+		sbi::console_putchar(byte as usize);
 	}
 
 	pub fn init(&self, baudrate: u32) {

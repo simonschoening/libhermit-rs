@@ -13,7 +13,7 @@
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 // UNCOMMENTED FOR CORRECT USE STATEMENT; IS THIS CORRECT?
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-#[cfg(all(feature = "pci", not(target_arch = "aarch64")))]
+#[cfg(any(target_arch = "riscv64", all(feature = "pci", not(target_arch = "aarch64"))))]
 pub mod net;
 
 #[cfg(all(feature = "pci", not(target_arch = "aarch64")))]

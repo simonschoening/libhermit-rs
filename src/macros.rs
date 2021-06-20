@@ -54,7 +54,27 @@ macro_rules! switch_to_kernel {
 	}
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+#[cfg(target_arch = "riscv64")]
+macro_rules! switch_to_kernel {
+	() => {
+		crate::arch::irq::disable();
+		#[allow(unused)]
+		unsafe {
+			let user_stack_pointer: usize;
+			// Store the user stack pointer and switch to the kernel stack
+			asm!(
+				"mv {user_stack_pointer}, sp",
+				"mv sp, {kernel_stack_pointer}",
+				user_stack_pointer = out(reg) user_stack_pointer,
+				kernel_stack_pointer = in(reg) get_kernel_stack(),
+			);
+			core_scheduler().set_current_user_stack(VirtAddr(user_stack_pointer as u64));
+		}
+		crate::arch::irq::enable();
+	}
+}
+
+#[cfg(target_arch = "aarch64")]
 macro_rules! switch_to_kernel {
 	() => {};
 }

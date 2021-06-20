@@ -21,6 +21,7 @@ use crate::arch::x86_64::kernel::serial::SerialPort;
 use crate::environment;
 use crate::kernel_message_buffer;
 use crate::scheduler::CoreId;
+use crate::arch::x86_64::mm::{PhysAddr};
 
 #[cfg(feature = "acpi")]
 pub mod acpi;
@@ -228,6 +229,10 @@ pub fn get_cmdsize() -> usize {
 
 pub fn get_cmdline() -> VirtAddr {
 	unsafe { VirtAddr(core::ptr::read_volatile(&(*BOOT_INFO).cmdline)) }
+}
+
+pub fn get_mem_base() -> PhysAddr {
+	PhysAddr(0)
 }
 
 /// Earliest initialization function called by the Boot Processor.

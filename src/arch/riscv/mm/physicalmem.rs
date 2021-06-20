@@ -11,6 +11,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::arch::riscv::mm::paging::{BasePageSize, PageSize};
 use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
 use crate::arch::riscv::kernel::get_limit;
+pub use crate::arch::riscv::kernel::get_mem_base;
 use crate::mm;
 use crate::mm::freelist::{FreeList, FreeListEntry};
 use crate::synch::spinlock::SpinlockIrqSave;
@@ -24,7 +25,7 @@ fn detect_from_limits() -> Result<(), ()> {
 		return Err(());
 	}
 
-	let entry = FreeListEntry::new(mm::kernel_end_address().as_usize(), limit);
+	let entry = FreeListEntry::new(mm::kernel_end_address().as_usize(), get_mem_base().as_usize() + limit);
 	PHYSICAL_FREE_LIST.lock().list.push_back(entry);
 	TOTAL_MEMORY.store(limit, Ordering::SeqCst);
 
@@ -38,8 +39,6 @@ pub fn init() {
 pub fn total_memory_size() -> usize {
 	TOTAL_MEMORY.load(Ordering::SeqCst)
 }
-
-pub fn init_page_tables() {}
 
 pub fn allocate(size: usize) -> Result<PhysAddr, ()> {
 	assert!(size > 0);

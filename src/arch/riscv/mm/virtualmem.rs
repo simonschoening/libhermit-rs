@@ -7,26 +7,27 @@
 
 use core::convert::TryInto;
 
-use crate::arch::riscv::mm::paging::{BasePageSize, PageSize};
+use crate::arch::riscv::kernel::get_mem_base;
+use crate::arch::riscv::mm::paging::{HugePageSize, BasePageSize, PageSize};
 use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
+use crate::arch::riscv::mm::physicalmem;
 use crate::mm;
 use crate::mm::freelist::{FreeList, FreeListEntry};
 use crate::synch::spinlock::SpinlockIrqSave;
 
 static KERNEL_FREE_LIST: SpinlockIrqSave<FreeList> = SpinlockIrqSave::new(FreeList::new());
 
-/// End of the virtual memory address space reserved for kernel memory (4 GiB).
+/// End of the virtual memory address space reserved for kernel memory (256 GiB).
 /// This also marks the start of the virtual memory address space reserved for the task heap.
-const KERNEL_VIRTUAL_MEMORY_END: VirtAddr = VirtAddr(0x1_0000_0000);
+const KERNEL_VIRTUAL_MEMORY_END: VirtAddr = VirtAddr(0x4000000000);
 
-/// End of the virtual memory address space reserved for task memory (128 TiB).
-/// This is the maximum contiguous virtual memory area possible with current x86-64 CPUs, which only support 48-bit
-/// linear addressing (in two 47-bit areas).
-const TASK_VIRTUAL_MEMORY_END: VirtAddr = VirtAddr(0x8000_0000_0000);
+/// End of the virtual memory address space reserved for task memory (512 GiB).
+/// This is the maximum contiguous virtual memory area possible with sv39
+const TASK_VIRTUAL_MEMORY_END: VirtAddr = VirtAddr(0x8000000000);
 
 pub fn init() {
 	let entry = FreeListEntry {
-		start: mm::kernel_end_address().as_usize(),
+		start: align_up!((get_mem_base() + PhysAddr(physicalmem::total_memory_size() as u64)).as_usize(), HugePageSize::SIZE),
 		end: KERNEL_VIRTUAL_MEMORY_END.as_usize(),
 	};
 	KERNEL_FREE_LIST.lock().list.push_back(entry);

@@ -6,76 +6,65 @@
 // copied, modified, or distributed except according to those terms.
 
 use core::marker::PhantomData;
-use core::{fmt, ptr, usize};
+use core::{fmt, ptr, usize, mem};
 
 use crate::arch::riscv::kernel::percore::*;
 use crate::arch::riscv::kernel::processor;
+use crate::arch::riscv::kernel::get_mem_base;
 use crate::arch::riscv::mm::physicalmem;
 use crate::arch::riscv::mm::virtualmem;
 use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
 use crate::mm;
 use crate::scheduler;
 
-extern "C" {
-	#[linkage = "extern_weak"]
-	static runtime_osinit: *const u8;
-}
+use riscv::asm::sfence_vma;
+use riscv::register::satp;
 
-/// Pointer to the root page table (called "Level 0" in ARM terminology).
-/// Setting the upper bits to zero tells the MMU to use TTBR0 for the base address for the first table.
-///
-/// See entry.S and ARM Cortex-A Series Programmer's Guide for ARMv8-A, Version 1.0, PDF page 172
-const L0TABLE_ADDRESS: *mut PageTable<L0Table> = 0x0000_FFFF_FFFF_F000 as *mut PageTable<L0Table>;
+static mut ROOT_PAGETABLE: PageTable<L2Table> = PageTable::new();
 
 /// Number of Offset bits of a virtual address for a 4 KiB page, which are shifted away to get its Page Frame Number (PFN).
 const PAGE_BITS: usize = 12;
 
-/// Number of bits of the index in each table (L0Table, L1Table, L2Table, L3Table).
+/// Number of bits of the index in each table
 const PAGE_MAP_BITS: usize = 9;
 
 /// A mask where PAGE_MAP_BITS are set to calculate a table index.
 const PAGE_MAP_MASK: usize = 0x1FF;
 
+/// Number of page levels
+const PAGE_LEVELS: usize = 3;
+
 bitflags! {
-	/// Useful flags for an entry in either table (L0Table, L1Table, L2Table, L3Table).
+	/// Flags for an PTE
 	///
-	/// See ARM Architecture Reference Manual, ARMv8, for ARMv8-A Reference Profile, Issue C.a, Chapter D4.3.3
+	/// See The RISC-V Instruction Set Manual Volume II: Privileged Architecture
 	pub struct PageTableEntryFlags: u64 {
 		/// Set if this entry is valid.
-		const PRESENT = 1 << 0;
+		const VALID = 1 << 0;
 
-		/// Set if this entry points to a table or a 4 KiB page.
-		const TABLE_OR_4KIB_PAGE = 1 << 1;
+		/// Set if this page is readable
+		const READABLE = 1 << 1;
 
-		/// Set if this entry points to device memory (non-gathering, non-reordering, no early write acknowledgement)
-		const DEVICE_NGNRNE = 0 << 4 | 0 << 3 | 0 << 2;
+		/// Set if this page is writable
+		const WRITABLE = 1 << 2;
 
-		/// Set if this entry points to device memory (non-gathering, non-reordering, early write acknowledgement)
-		const DEVICE_NGNRE = 0 << 4 | 0 << 3 | 1 << 2;
+		/// Set if this page is executable
+		const EXECUTABLE = 1 << 3;
 
-		/// Set if this entry points to device memory (gathering, reordering, early write acknowledgement)
-		const DEVICE_GRE = 0 << 4 | 1 << 3 | 0 << 2;
+		/// Set if memory referenced by this entry shall be accessible from user-mode
+		const USER_ACCESSIBLE = 1 << 4;
 
-		/// Set if this entry points to normal memory (non-cacheable)
-		const NORMAL_NC = 0 << 4 | 1 << 3 | 1 << 2;
+		/// Set if mapping exists in all address spaces
+		const GLOBAL = 1 << 5;
 
-		/// Set if this entry points to normal memory (cacheable)
-		const NORMAL = 1 << 4 | 0 << 3 | 0 << 2;
+		/// Set if software has accessed this entry
+		const ACCESSED = 1 << 6;
 
-		/// Set if memory referenced by this entry shall be read-only.
-		const READ_ONLY = 1 << 7;
+		/// Only for page entries: Set if software has written to the memory referenced by this entry.
+		const DIRTY = 1 << 7;
 
-		/// Set if this entry shall be shared between all cores of the system.
-		const INNER_SHAREABLE = 1 << 8 | 1 << 9;
-
-		/// Set if software has accessed this entry (for memory access or address translation).
-		const ACCESSED = 1 << 10;
-
-		/// Set if code execution shall be disabled for memory referenced by this entry in privileged mode.
-		const PRIVILEGED_EXECUTE_NEVER = 1 << 53;
-
-		/// Set if code execution shall be disabled for memory referenced by this entry in unprivileged mode.
-		const UNPRIVILEGED_EXECUTE_NEVER = 1 << 54;
+		/// The RSW field is reserved for use by supervisor
+		const RSW  = 1 << 8 | 1 << 9;
 	}
 }
 
@@ -85,34 +74,33 @@ impl PageTableEntryFlags {
 	const BLANK: PageTableEntryFlags = PageTableEntryFlags { bits: 0 };
 
 	pub fn device(&mut self) -> &mut Self {
-		self.insert(PageTableEntryFlags::DEVICE_NGNRE);
 		self
 	}
 
 	pub fn normal(&mut self) -> &mut Self {
-		self.insert(PageTableEntryFlags::NORMAL);
+		self.insert(PageTableEntryFlags::EXECUTABLE);
+		self.insert(PageTableEntryFlags::READABLE);
 		self
 	}
 
 	pub fn read_only(&mut self) -> &mut Self {
-		self.insert(PageTableEntryFlags::READ_ONLY);
+		self.remove(PageTableEntryFlags::WRITABLE);
 		self
 	}
 
 	pub fn writable(&mut self) -> &mut Self {
-		self.remove(PageTableEntryFlags::READ_ONLY);
+		self.insert(PageTableEntryFlags::WRITABLE);
 		self
 	}
 
 	pub fn execute_disable(&mut self) -> &mut Self {
-		self.insert(PageTableEntryFlags::PRIVILEGED_EXECUTE_NEVER);
-		self.insert(PageTableEntryFlags::UNPRIVILEGED_EXECUTE_NEVER);
+		self.remove(PageTableEntryFlags::EXECUTABLE);
 		self
 	}
 }
 
 /// An entry in either table
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct PageTableEntry {
 	/// Physical memory address this entry refers, combined with flags from PageTableEntryFlags.
 	physical_address_and_flags: PhysAddr,
@@ -122,15 +110,36 @@ impl PageTableEntry {
 	/// Return the stored physical address.
 	pub fn address(&self) -> PhysAddr {
 		PhysAddr(
-			self.physical_address_and_flags.as_u64()
-				& !(BasePageSize::SIZE as u64 - 1u64)
-				& !(u64::MAX << 48),
+			(self.physical_address_and_flags.as_u64()
+				& !(0x3FFu64)
+				//& !(0x3FFu64 << 54)
+			) << 2
 		)
 	}
 
 	/// Returns whether this entry is valid (present).
 	fn is_present(&self) -> bool {
-		(self.physical_address_and_flags & PageTableEntryFlags::PRESENT.bits()) != 0
+		(self.physical_address_and_flags & PageTableEntryFlags::VALID.bits()) != 0
+	}
+
+	/// Returns `true` if the page is accessible from the user space
+	fn is_user(self) -> bool {
+		(self.physical_address_and_flags & PageTableEntryFlags::USER_ACCESSIBLE.bits()) != 0
+	}
+
+	/// Returns `true` if the page is readable
+	fn is_readable(self) -> bool {
+		(self.physical_address_and_flags & PageTableEntryFlags::READABLE.bits()) != 0
+	}
+
+	/// Returns `true` if the page is writable
+	fn is_writable(self) -> bool {
+		(self.physical_address_and_flags & PageTableEntryFlags::WRITABLE.bits()) != 0
+	}
+
+	/// Returns `true` if the page is executable
+	fn is_executable(self) -> bool {
+		(self.physical_address_and_flags & PageTableEntryFlags::EXECUTABLE.bits()) != 0
 	}
 
 	/// Mark this as a valid (present) entry and set address translation and flags.
@@ -138,7 +147,7 @@ impl PageTableEntry {
 	/// # Arguments
 	///
 	/// * `physical_address` - The physical memory address this entry shall translate to
-	/// * `flags` - Flags from PageTableEntryFlags (note that the PRESENT, INNER_SHAREABLE, and ACCESSED flags are set automatically)
+	/// * `flags` - Flags from PageTableEntryFlags (note that the VALID, GLOBAL, DIRTY and ACCESSED flags are set)
 	fn set(&mut self, physical_address: PhysAddr, flags: PageTableEntryFlags) {
 		// Verify that the offset bits for a 4 KiB page are zero.
 		assert_eq!(
@@ -149,10 +158,12 @@ impl PageTableEntry {
 		);
 
 		let mut flags_to_set = flags;
-		flags_to_set.insert(PageTableEntryFlags::PRESENT);
-		flags_to_set.insert(PageTableEntryFlags::INNER_SHAREABLE);
+		flags_to_set.insert(PageTableEntryFlags::VALID);
+		flags_to_set.insert(PageTableEntryFlags::GLOBAL);
 		flags_to_set.insert(PageTableEntryFlags::ACCESSED);
-		self.physical_address_and_flags = PhysAddr(physical_address.as_u64() | flags_to_set.bits());
+		flags_to_set.insert(PageTableEntryFlags::DIRTY);
+		//debug!("(physical_address.as_u64(): {:#X}", physical_address.as_u64());
+		self.physical_address_and_flags = PhysAddr((physical_address.as_u64() >> 2) | flags_to_set.bits());
 	}
 }
 
@@ -177,8 +188,8 @@ pub trait PageSize: Copy {
 pub enum BasePageSize {}
 impl PageSize for BasePageSize {
 	const SIZE: usize = 4096;
-	const MAP_LEVEL: usize = 3;
-	const MAP_EXTRA_FLAG: PageTableEntryFlags = PageTableEntryFlags::TABLE_OR_4KIB_PAGE;
+	const MAP_LEVEL: usize = 0;
+	const MAP_EXTRA_FLAG: PageTableEntryFlags = PageTableEntryFlags::BLANK;
 }
 
 /// A 2 MiB page mapped in the L2Table.
@@ -186,7 +197,7 @@ impl PageSize for BasePageSize {
 pub enum LargePageSize {}
 impl PageSize for LargePageSize {
 	const SIZE: usize = 2 * 1024 * 1024;
-	const MAP_LEVEL: usize = 2;
+	const MAP_LEVEL: usize = 1;
 	const MAP_EXTRA_FLAG: PageTableEntryFlags = PageTableEntryFlags::BLANK;
 }
 
@@ -195,7 +206,7 @@ impl PageSize for LargePageSize {
 pub enum HugePageSize {}
 impl PageSize for HugePageSize {
 	const SIZE: usize = 1024 * 1024 * 1024;
-	const MAP_LEVEL: usize = 1;
+	const MAP_LEVEL: usize = 2;
 	const MAP_EXTRA_FLAG: PageTableEntryFlags = PageTableEntryFlags::BLANK;
 }
 
@@ -218,22 +229,21 @@ impl<S: PageSize> Page<S> {
 
 	/// Flushes this page from the TLB of this CPU.
 	fn flush_from_tlb(&self) {
-		/* // See ARM Cortex-A Series Programmer's Guide for ARMv8-A, Version 1.0, PDF page 198
-		//
-		// We use "vale1is" instead of "vae1is" to always flush the last table level only (performance optimization).
-		// The "is" attribute broadcasts the TLB flush to all cores, so we don't need an IPI (unlike x86_64).
+		//TODO: ASID?
 		unsafe {
-			llvm_asm!("dsb ishst; tlbi vale1is, $0; dsb ish; isb" :: "r"(self.virtual_address) : "memory" : "volatile");
-		} */
+			sfence_vma(0, self.virtual_address.as_usize());
+		}
 	}
 
-	/// Returns whether the given virtual address is a valid one in the AArch64 memory model.
-	///
-	/// Current AArch64 supports only 48-bit for virtual memory addresses.
-	/// The upper bits must always be 0 or 1 and indicate whether TBBR0 or TBBR1 contains the
-	/// base address. So always enforce 0 here.
+	/// Returns whether the given virtual address is a valid one in SV39
 	fn is_valid_address(virtual_address: VirtAddr) -> bool {
-		virtual_address < VirtAddr(0x1_0000_0000_0000)
+		//virtual_address < VirtAddr(1u64 << 39)
+		if virtual_address.as_u64() & (1 << 38) != 0 {
+			return virtual_address.as_u64() >> 39 == (1 << (64 - 39)) - 1;
+		}
+		else{
+			return virtual_address.as_u64() >> 39 == 0;
+		}
 	}
 
 	/// Returns a Page including the given virtual address.
@@ -261,10 +271,9 @@ impl<S: PageSize> Page<S> {
 	}
 
 	/// Returns the index of this page in the table given by L.
-	fn table_index<L: PageTableLevel>(&self) -> usize {
-		assert!(L::LEVEL <= S::MAP_LEVEL);
-		self.virtual_address.as_usize() >> PAGE_BITS >> (3 - L::LEVEL) * PAGE_MAP_BITS
-			& PAGE_MAP_MASK
+	fn table_index<L: PageTableLevel>(self) -> usize {
+		assert!(L::LEVEL >= S::MAP_LEVEL);
+		self.virtual_address.as_usize() >> PAGE_BITS >> (L::LEVEL * PAGE_MAP_BITS) & PAGE_MAP_MASK
 	}
 }
 
@@ -304,44 +313,35 @@ trait PageTableLevelWithSubtables: PageTableLevel {
 	type SubtableLevel;
 }
 
-/// The Level 0 Table
-enum L0Table {}
-impl PageTableLevel for L0Table {
-	const LEVEL: usize = 0;
-}
-
-impl PageTableLevelWithSubtables for L0Table {
-	type SubtableLevel = L1Table;
-}
-
-/// The Level 1 Table (can map 1 GiB pages)
-enum L1Table {}
-impl PageTableLevel for L1Table {
-	const LEVEL: usize = 1;
-}
-
-impl PageTableLevelWithSubtables for L1Table {
-	type SubtableLevel = L2Table;
-}
-
-/// The Level 2 Table (can map 2 MiB pages)
+/// The Level 2 Table (can map 1 GiB pages)
 enum L2Table {}
 impl PageTableLevel for L2Table {
 	const LEVEL: usize = 2;
 }
 
 impl PageTableLevelWithSubtables for L2Table {
-	type SubtableLevel = L3Table;
+	type SubtableLevel = L1Table;
 }
 
-/// The Level 3 Table (can map 4 KiB pages)
-enum L3Table {}
-impl PageTableLevel for L3Table {
-	const LEVEL: usize = 3;
+/// The Level 1 Table (can map 2 MiB pages)
+enum L1Table {}
+impl PageTableLevel for L1Table {
+	const LEVEL: usize = 1;
+}
+
+impl PageTableLevelWithSubtables for L1Table {
+	type SubtableLevel = L0Table;
+}
+
+/// The Level 0 Table (can map 4 KiB pages)
+enum L0Table {}
+impl PageTableLevel for L0Table {
+	const LEVEL: usize = 0;
 }
 
 /// Representation of any page table in memory.
 /// Parameter L supplies information for Rust's typing system to distinguish between the different tables.
+#[repr(align(4096))]
 struct PageTable<L> {
 	/// Each page table has 512 entries (can be calculated using PAGE_MAP_BITS).
 	entries: [PageTableEntry; 1 << PAGE_MAP_BITS],
@@ -369,6 +369,20 @@ trait PageTableMethods {
 	);
 }
 
+impl<L: PageTableLevel> PageTable<L>
+{
+	const fn new() -> Self {
+		PageTable {
+			entries: [
+			PageTableEntry {
+				physical_address_and_flags: PhysAddr::zero(),
+			};
+			1 << PAGE_MAP_BITS],
+			level: PhantomData,
+		}
+	}
+}
+
 impl<L: PageTableLevel> PageTableMethods for PageTable<L> {
 	/// Maps a single page in this table to the given physical address.
 	///
@@ -381,7 +395,9 @@ impl<L: PageTableLevel> PageTableMethods for PageTable<L> {
 	) {
 		assert_eq!(L::LEVEL, S::MAP_LEVEL);
 		let index = page.table_index::<L>();
+		//trace!("Address: {:p}, index: {}", &self, index);
 		let flush = self.entries[index].is_present();
+		//trace!("Ok: {:p}", &self);
 
 		self.entries[index].set(physical_address, S::MAP_EXTRA_FLAG | flags);
 
@@ -392,8 +408,8 @@ impl<L: PageTableLevel> PageTableMethods for PageTable<L> {
 
 	/// Returns the PageTableEntry for the given page if it is present, otherwise returns None.
 	///
-	/// This is the default implementation called only for L3Table.
-	/// It is overridden by a specialized implementation for all tables with sub tables (all except L3Table).
+	/// This is the default implementation called only for L0Table.
+	/// It is overridden by a specialized implementation for all tables with sub tables (all except L0Table).
 	default fn get_page_table_entry<S: PageSize>(&self, page: Page<S>) -> Option<PageTableEntry> {
 		assert_eq!(L::LEVEL, S::MAP_LEVEL);
 		let index = page.table_index::<L>();
@@ -425,14 +441,14 @@ where
 {
 	/// Returns the PageTableEntry for the given page if it is present, otherwise returns None.
 	///
-	/// This is the implementation for all tables with subtables (L0Table, L1Table, L2Table).
+	/// This is the implementation for all tables with subtables (L1, L2).
 	/// It overrides the default implementation above.
 	fn get_page_table_entry<S: PageSize>(&self, page: Page<S>) -> Option<PageTableEntry> {
-		assert!(L::LEVEL <= S::MAP_LEVEL);
+		assert!(L::LEVEL >= S::MAP_LEVEL);
 		let index = page.table_index::<L>();
 
 		if self.entries[index].is_present() {
-			if L::LEVEL < S::MAP_LEVEL {
+			if L::LEVEL > S::MAP_LEVEL {
 				let subtable = self.subtable::<S>(page);
 				subtable.get_page_table_entry::<S>(page)
 			} else {
@@ -445,7 +461,7 @@ where
 
 	/// Maps a single page to the given physical address.
 	///
-	/// This is the implementation for all tables with subtables (L0Table, L1Table, L2Table).
+	/// This is the implementation for all tables with subtables (L1, L2).
 	/// It overrides the default implementation above.
 	fn map_page<S: PageSize>(
 		&mut self,
@@ -453,20 +469,29 @@ where
 		physical_address: PhysAddr,
 		flags: PageTableEntryFlags,
 	) {
-		assert!(L::LEVEL <= S::MAP_LEVEL);
+		assert!(L::LEVEL >= S::MAP_LEVEL);
 
-		if L::LEVEL < S::MAP_LEVEL {
+		// trace!(
+		// 	"Mapping frame {:#X} to page {:#X}",
+		// 	physical_address,
+		// 	page.virtual_address,
+		// );
+
+		if L::LEVEL > S::MAP_LEVEL {
 			let index = page.table_index::<L>();
+
+			// trace!("L::LEVEL > S::MAP_LEVEL");
+
+			// trace!("self.entries[index] {:?} , index {}",self.entries[index], index);
 
 			// Does the table exist yet?
 			if !self.entries[index].is_present() {
+				// trace!("New PT");
 				// Allocate a single 4 KiB page for the new entry and mark it as a valid, writable subtable.
-				let physical_address = physicalmem::allocate(BasePageSize::SIZE)
-					.expect("Unable to allocate physical memory");
-				self.entries[index].set(
-					physical_address,
-					PageTableEntryFlags::NORMAL | PageTableEntryFlags::TABLE_OR_4KIB_PAGE,
-				);
+				let new_entry = physicalmem::allocate(BasePageSize::SIZE).unwrap();
+				self.entries[index].set(new_entry, PageTableEntryFlags::BLANK);
+
+				//debug!("new_entry {:#X}", new_entry);
 
 				// Mark all entries as unused in the newly created table.
 				let subtable = self.subtable::<S>(page);
@@ -493,13 +518,15 @@ where
 	///
 	/// Must only be called if a page of this size is mapped in a subtable!
 	fn subtable<S: PageSize>(&self, page: Page<S>) -> &mut PageTable<L::SubtableLevel> {
-		assert!(L::LEVEL < S::MAP_LEVEL);
+		assert!(L::LEVEL > S::MAP_LEVEL);
 
 		// Calculate the address of the subtable.
 		let index = page.table_index::<L>();
-		let table_address = self as *const PageTable<L> as usize;
-		let subtable_address =
-			(table_address << PAGE_MAP_BITS) & !(usize::MAX << 48) | (index << PAGE_BITS);
+		//debug!("Index: {:#X}", index);
+		let subtable_address = self.entries[index].address().as_usize();
+		//debug!("subtable_address: {:#X}", subtable_address);
+		//let table_address = self as *const PageTable<L> as usize;
+		//let subtable_address = (table_address << PAGE_MAP_BITS) | (index << PAGE_BITS);
 		unsafe { &mut *(subtable_address as *mut PageTable<L::SubtableLevel>) }
 	}
 
@@ -537,28 +564,37 @@ pub fn get_page_table_entry<S: PageSize>(virtual_address: VirtAddr) -> Option<Pa
 	trace!("Looking up Page Table Entry for {:#X}", virtual_address);
 
 	let page = Page::<S>::including_address(virtual_address);
-	let root_pagetable = unsafe { &mut *L0TABLE_ADDRESS };
-	root_pagetable.get_page_table_entry(page)
+	//let root_pagetable = unsafe { &mut *L2TABLE_ADDRESS };
+	/* let root_pagetable = unsafe {
+		&mut *mem::transmute::<*mut u64, *mut PageTable<L2Table>>(L2TABLE_ADDRESS.as_mut_ptr())
+	}; */
+	unsafe{ ROOT_PAGETABLE.get_page_table_entry(page)}
 }
 
 pub fn get_physical_address<S: PageSize>(virtual_address: VirtAddr) -> PhysAddr {
 	trace!("Getting physical address for {:#X}", virtual_address);
 
-	/* let page = Page::<S>::including_address(virtual_address);
-	let root_pagetable = unsafe { &mut *L0TABLE_ADDRESS };
-	let address = root_pagetable
-		.get_page_table_entry(page)
-		.expect("Entry not present")
-		.address();
+	let page = Page::<S>::including_address(virtual_address);
+	//let root_pagetable = unsafe { &mut *L2TABLE_ADDRESS };
+	/* let root_pagetable = unsafe {
+		&mut *mem::transmute::<*mut u64, *mut PageTable<L2Table>>(L2TABLE_ADDRESS.as_mut_ptr())
+	}; */
+	let address = unsafe {
+		ROOT_PAGETABLE
+			.get_page_table_entry(page)
+			.expect("Entry not present")
+			.address()
+	};
 	let offset = virtual_address & (S::SIZE - 1);
-	PhysAddr(address.as_u64() | offset.as_u64()) */
-	PhysAddr(virtual_address.as_u64())
+	PhysAddr(address.as_u64() | offset.as_u64())
+	//PhysAddr(virtual_address.as_u64())
 }
 
 /// Translate a virtual memory address to a physical one.
 /// Just like get_physical_address, but automatically uses the correct page size for the respective memory address.
 pub fn virtual_to_physical(virtual_address: VirtAddr) -> PhysAddr {
-	if virtual_address < mm::kernel_start_address() {
+	// panic!("Not impemented!");
+	/* if virtual_address < mm::kernel_start_address() {
 		// Parts of the memory below the kernel image are identity-mapped.
 		// However, this range should never be used in a virtual_to_physical call.
 		panic!(
@@ -580,7 +616,43 @@ pub fn virtual_to_physical(virtual_address: VirtAddr) -> PhysAddr {
 			"Trying to get the physical address of {:#X}, which is too high",
 			virtual_address
 		);
+	} */
+	let mut vpn: [u64; PAGE_LEVELS] = [0; PAGE_LEVELS];
+
+	for i in (0..PAGE_LEVELS){
+		vpn[i] = (virtual_address >> (PAGE_BITS + i*PAGE_MAP_BITS)) & PAGE_MAP_MASK as u64;
+		debug!("i: {}, vpn[i]: {:#X}, {:#X}", i , vpn[i], virtual_address >> (PAGE_BITS + i*PAGE_MAP_BITS));
 	}
+
+	let mut page_table_addr = unsafe{ &ROOT_PAGETABLE as *const PageTable<L2Table>};
+	for i in (0..PAGE_LEVELS).rev() {
+		let pte = unsafe{(*page_table_addr).entries[(vpn[i]) as usize]};
+		debug!("PTE: {:?} , i: {}, vpn[i]: {:#X}", pte, i , vpn[i]);
+		//Translation would raise a page-fault exception 
+		assert!(pte.is_present() && !(!pte.is_readable() && pte.is_writable()), "Invalid PTE: {:?}", pte);
+
+		if pte.is_executable() || pte.is_readable() {
+			//PTE is a leaf
+			debug!("PTE is a leaf");
+			let mut phys_address = virtual_address.as_u64() & ((1<<PAGE_BITS) - 1);
+			for j in 0..i {
+				phys_address = phys_address | (vpn[j]) << (PAGE_BITS + j*PAGE_MAP_BITS);
+			}
+			let ppn = pte.address().as_u64();
+			for j in i..PAGE_LEVELS {
+				debug!("ppn: {:#X}, {:#X}", ppn, ppn & (PAGE_MAP_MASK << (PAGE_BITS + j*PAGE_MAP_BITS)) as u64);
+				phys_address = phys_address | (ppn & (PAGE_MAP_MASK << (PAGE_BITS + j*PAGE_MAP_BITS)) as u64);
+			}
+			return PhysAddr(phys_address);
+		}
+		else {
+			//PTE is a pointer to the next level of the page table
+			assert!(i != 0); //pte should be a leaf if i=0
+			page_table_addr = pte.address().as_usize() as *mut PageTable<L2Table>;
+			debug!("PTE is pointer: {:?}", page_table_addr);
+		}
+	} 
+	panic!("virtual_to_physical should never reach this point");
 }
 
 #[no_mangle]
@@ -595,21 +667,116 @@ pub fn map<S: PageSize>(
 	flags: PageTableEntryFlags,
 ) {
 	trace!(
-		"Mapping virtual address {:#X} to physical address {:#X} ({} pages)",
-		virtual_address,
+		"Mapping physical address {:#X} to virtual address {:#X} ({} pages)",
 		physical_address,
+		virtual_address,
 		count
 	);
 
-	assert_eq!(virtual_address.as_u64(), physical_address.as_u64(), "Paging not implemented");
-	/* let range = get_page_range::<S>(virtual_address, count);
-	let root_pagetable = unsafe { &mut *L0TABLE_ADDRESS };
-	root_pagetable.map_pages(range, physical_address, flags); */
+	let range = get_page_range::<S>(virtual_address, count);
+	unsafe{ROOT_PAGETABLE.map_pages(range, physical_address, flags);}
+
+	//assert_eq!(virtual_address.as_u64(), physical_address.as_u64(), "Paging not implemented");
 }
 
-pub fn unmap<S: PageSize>(virtual_address: VirtAddr, count: usize) {}
+pub fn unmap<S: PageSize>(virtual_address: VirtAddr, count: usize) {
+	trace!(
+		"Unmapping virtual address {:#X} ({} pages)",
+		virtual_address,
+		count
+	);
+
+	let range = get_page_range::<S>(virtual_address, count);
+	/* let root_pagetable = unsafe {
+		&mut *mem::transmute::<*mut u64, *mut PageTable<L2Table>>(L2TABLE_ADDRESS.as_mut_ptr())
+	}; */
+	unsafe{ROOT_PAGETABLE.map_pages(range, PhysAddr::zero(), PageTableEntryFlags::BLANK);}
+}
 
 #[inline]
 pub fn get_application_page_size() -> usize {
 	LargePageSize::SIZE
+}
+
+pub fn identity_map<S: PageSize>(start_address: PhysAddr, end_address: PhysAddr) {
+	let first_page = Page::<S>::including_address(VirtAddr(start_address.as_u64()));
+	let last_page = Page::<S>::including_address(VirtAddr(end_address.as_u64()));
+	
+	trace!(
+		"identity_map address {:#X} to address {:#X}",
+		first_page.virtual_address,
+		last_page.virtual_address,
+	);
+
+	/* assert!(
+		last_page.address() < mm::kernel_start_address(),
+		"Address {:#X} to be identity-mapped is not below Kernel start address",
+		last_page.address()
+	); */
+
+	/* let root_pagetable = unsafe {
+		&mut *mem::transmute::<*mut u64, *mut PageTable<L2Table>>(L2TABLE_ADDRESS.as_mut_ptr())
+	}; */
+	let range = Page::<S>::range(first_page, last_page);
+	let mut flags = PageTableEntryFlags::empty();
+	flags.normal().writable();
+	unsafe{ROOT_PAGETABLE.map_pages(range, PhysAddr(first_page.address().as_u64()), flags);}
+}
+
+pub fn init_page_tables() {
+	debug!("Identity map the physical memory using HugePages");
+	
+	unsafe{
+		/* for i in 0..477 {
+			ROOT_PAGETABLE.entries[i].set(
+				PhysAddr(i as u64* HugePageSize::SIZE as u64),
+				PageTableEntryFlags::WRITABLE
+					| PageTableEntryFlags::READABLE
+					| PageTableEntryFlags::EXECUTABLE,
+			);
+		}
+
+		for i in 477..512 {
+			ROOT_PAGETABLE.entries[i].set(
+				PhysAddr(0 as u64* HugePageSize::SIZE as u64),
+				PageTableEntryFlags::WRITABLE
+					| PageTableEntryFlags::READABLE
+					| PageTableEntryFlags::EXECUTABLE,
+			);
+		} */
+
+		// let mut flags = PageTableEntryFlags::empty();
+		// flags.normal().writable();
+
+		// map::<LargePageSize>(VirtAddr(0x0),PhysAddr(0x0), 4, flags);
+
+		// virtualmem::allocate(LargePageSize::SIZE).unwrap();
+
+		identity_map::<HugePageSize>(get_mem_base(), get_mem_base() + PhysAddr(physicalmem::total_memory_size() as u64 - 1));
+
+		sfence_vma(0, 0);
+
+		// let page = Page::<LargePageSize>::including_address(VirtAddr(0x051332));
+		// debug!("PAGE: {:?}" , page.virtual_address);
+		// let subt = ROOT_PAGETABLE.subtable::<LargePageSize>(page);
+
+		// debug!("SUB: {:p}", subt as *mut _);
+
+		// debug!("ROOT: {:?}" , subt.entries[1]);
+
+		satp::write(0x8 << 60 | ((&ROOT_PAGETABLE as *const _ as usize) >> 12))
+	}
+
+	//debug!("??? {:?}", virtual_to_physical(VirtAddr(0x151332)));
+	//panic!("STOP");
+	//debug!("??? {:?}", get_physical_address::<HugePageSize>(VirtAddr(0xFFFF_FFFF_FFFF_FFFF)));
+	//debug!("!!! {:?}", virtual_to_physical(VirtAddr(0xFFFF_FFFF_FFFF_FFFF)));
+}
+
+pub fn init_application_processor() {
+	//debug!("Identity map the physical memory using HugePages");
+	unsafe{
+		sfence_vma(0, 0);
+		satp::write(0x8 << 60 | ((&ROOT_PAGETABLE as *const _ as usize) >> 12))
+	}
 }

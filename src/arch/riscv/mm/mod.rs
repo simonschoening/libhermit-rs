@@ -13,7 +13,7 @@ pub mod addr;
 pub use addr::PhysAddr;
 pub use addr::VirtAddr;
 
-pub use self::physicalmem::init_page_tables;
+pub use self::paging::init_page_tables;
 
 pub fn init() {
 	physicalmem::init();

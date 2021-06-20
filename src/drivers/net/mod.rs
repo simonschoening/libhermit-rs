@@ -11,7 +11,12 @@ pub mod rtl8139;
 #[cfg(feature = "pci")]
 pub mod virtio_net;
 
+// #[cfg(target_arch = "riscv64")]
+// pub mod cadence_gem;
+
+#[cfg(target_arch = "x86_64")]
 use crate::arch::kernel::apic;
+#[cfg(target_arch = "x86_64")]
 use crate::arch::kernel::irq::ExceptionStackFrame;
 #[cfg(feature = "pci")]
 use crate::arch::kernel::pci;

@@ -296,6 +296,10 @@ extern "C" fn initd(_arg: usize) {
 	#[cfg(all(target_arch = "x86_64", feature = "pci"))]
 	x86_64::kernel::pci::init_drivers();
 
+	// Initialize MMIO Drivers if on riscv64
+	#[cfg(target_arch = "riscv64")]
+	riscv::kernel::init_drivers();
+
 	syscalls::init();
 
 	// Get the application arguments and environment variables.

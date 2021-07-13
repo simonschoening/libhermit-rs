@@ -121,7 +121,7 @@ pub fn set_oneshot_timer(wakeup_time: Option<u64>) {
 		sbi::set_timer(next_time);
 	}
 	else{
-		// Disable the Timer.
+		// Disable the Timer (and clear a pending interrupt)
 		debug!("Stopping Timer");
 		sbi::set_timer(u64::MAX);
 	}

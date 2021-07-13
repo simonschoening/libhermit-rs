@@ -53,6 +53,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
 
 [[package]]
+name = "byteorder"
+version = "1.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
+
+[[package]]
 name = "cc"
 version = "1.0.68"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -89,6 +95,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1267f4ac4f343772758f7b1bdcbe767c218bbab93bb432acbf5162bbf85a6c4"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "hermit-dtb"
+version = "0.1.0"
+source = "git+https://github.com/hermitcore/dtb.git?branch=master#9d8030fd37a48e95f69e9014e78d0c0049dcc0c6"
+dependencies = [
+ "byteorder",
 ]
 
 [[package]]
@@ -308,6 +322,7 @@ dependencies = [
  "bitflags",
  "crossbeam-utils",
  "float-cmp",
+ "hermit-dtb",
  "log",
  "multiboot",
  "num",
@@ -316,6 +331,7 @@ dependencies = [
  "qemu-exit",
  "riscv",
  "scopeguard",
+ "tock-registers",
  "trapframe",
  "x86 0.34.0",
  "x86 0.35.0",
@@ -356,8 +372,6 @@ dependencies = [
 [[package]]
 name = "tock-registers"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f521a79accce68c417c9c77ce22108056b626126da1932f7e2e9b5bbffee0cea"
 
 [[package]]
 name = "trapframe"

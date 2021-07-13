@@ -727,50 +727,12 @@ pub fn init_page_tables() {
 	debug!("Identity map the physical memory using HugePages");
 	
 	unsafe{
-		/* for i in 0..477 {
-			ROOT_PAGETABLE.entries[i].set(
-				PhysAddr(i as u64* HugePageSize::SIZE as u64),
-				PageTableEntryFlags::WRITABLE
-					| PageTableEntryFlags::READABLE
-					| PageTableEntryFlags::EXECUTABLE,
-			);
-		}
-
-		for i in 477..512 {
-			ROOT_PAGETABLE.entries[i].set(
-				PhysAddr(0 as u64* HugePageSize::SIZE as u64),
-				PageTableEntryFlags::WRITABLE
-					| PageTableEntryFlags::READABLE
-					| PageTableEntryFlags::EXECUTABLE,
-			);
-		} */
-
-		// let mut flags = PageTableEntryFlags::empty();
-		// flags.normal().writable();
-
-		// map::<LargePageSize>(VirtAddr(0x0),PhysAddr(0x0), 4, flags);
-
-		// virtualmem::allocate(LargePageSize::SIZE).unwrap();
-
 		identity_map::<HugePageSize>(get_mem_base(), get_mem_base() + PhysAddr(physicalmem::total_memory_size() as u64 - 1));
 
 		sfence_vma(0, 0);
 
-		// let page = Page::<LargePageSize>::including_address(VirtAddr(0x051332));
-		// debug!("PAGE: {:?}" , page.virtual_address);
-		// let subt = ROOT_PAGETABLE.subtable::<LargePageSize>(page);
-
-		// debug!("SUB: {:p}", subt as *mut _);
-
-		// debug!("ROOT: {:?}" , subt.entries[1]);
-
 		satp::write(0x8 << 60 | ((&ROOT_PAGETABLE as *const _ as usize) >> 12))
 	}
-
-	//debug!("??? {:?}", virtual_to_physical(VirtAddr(0x151332)));
-	//panic!("STOP");
-	//debug!("??? {:?}", get_physical_address::<HugePageSize>(VirtAddr(0xFFFF_FFFF_FFFF_FFFF)));
-	//debug!("!!! {:?}", virtual_to_physical(VirtAddr(0xFFFF_FFFF_FFFF_FFFF)));
 }
 
 pub fn init_application_processor() {

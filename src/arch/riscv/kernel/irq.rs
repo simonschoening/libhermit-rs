@@ -11,14 +11,33 @@ use riscv::asm::wfi;
 use trapframe::TrapFrame;
 use crate::arch::riscv::kernel::processor::set_oneshot_timer;
 
+use crate::synch::spinlock::Spinlock;
+
+/// base address of the PLIC, only one access at the same time is allowed
+static PLIC_BASE: Spinlock<usize> = Spinlock::new(0x0);
+
+const PLIC_PENDING_OFFSET: usize = 0x001000;
+const PLIC_ENABLE_OFFSET: usize = 0x002000;
+
+const MAX_IRQ: usize = 69;
+
+static mut IRQ_HANDLERS: [usize; MAX_IRQ] = [0; MAX_IRQ];
+
+
 /// Init Interrupts
 pub fn install() {
 	unsafe{
 		// Intstall trap handler
 		trapframe::init();
+		// Enable external interrupts
+		sie::set_sext();
 	}
 }
 
+/// Init PLIC
+pub fn init_plic(base: usize) {
+	*PLIC_BASE.lock() = base;
+}
 
 /// Enable Interrupts
 #[inline]
@@ -35,6 +54,8 @@ pub fn enable_and_wait() {
 	unsafe{
 		//Enable Supervisor-level software interrupts
 		sie::set_ssoft();
+		//sie::set_sext();
+		debug!("Wait {:x?}", sie::read());
 		loop{
 			wfi();
 			// Interrupts are disabled at this point, so a pending interrupt will
@@ -43,13 +64,15 @@ pub fn enable_and_wait() {
 
 			let pending_interrupts = sip::read();
 			
-			//debug!("sip: {:x?}", pending_interrupts);
+			// debug!("sip: {:x?}", pending_interrupts);
 			#[cfg(feature = "smp")]
 			if pending_interrupts.ssoft() {
 				//Clear pending interrupts, maybe only the bit for Supervisor-level software interrupt should be cleared
 				asm!(
-					"csrw sip, zero"
+					"csrc sip, {ssoft_mask}",
+					ssoft_mask = in(reg) 0x2,
 				);
+				trace!("SOFT");
 				//Disable Supervisor-level software interrupt
 				sie::clear_ssoft();
 				//debug!("sip2: {:x?}", pending_interrupts);
@@ -57,15 +80,22 @@ pub fn enable_and_wait() {
 				break;
 			}
 			
+			if pending_interrupts.sext() {
+				trace!("EXT");
+				external_handler();
+				break;
+			}
+			
 			if pending_interrupts.stimer() {
 				// Disable Supervisor-level software interrupt
 				sie::clear_ssoft();
 				// Setting the timer clears the pending interrupt
+				debug!("sip: {:x?}", pending_interrupts);
 				set_oneshot_timer(None);
+				trace!("TIMER");
 				crate::arch::riscv::kernel::scheduler::timer_handler();
 				break;
 			}
-			
 		}
 
 	}
@@ -106,10 +136,22 @@ pub fn nested_enable(was_enabled: bool) {
 
 /// Currently not needed because we use the trapframe crate
 #[no_mangle]
-pub extern "C" fn irq_install_handler(handler: usize) {
-	info!("Install handler for interrupts");
-	// TODO direct or vector?
-	//unsafe{stvec::write(handler,stvec::TrapMode::Direct);}
+pub extern "C" fn irq_install_handler(irq_number: u16, handler: usize) {
+	unsafe{
+		let base_ptr = PLIC_BASE.lock();
+		debug!("Install handler for interrupt {}", irq_number);
+		IRQ_HANDLERS[irq_number as usize - 1] = handler;
+		// Set priority to 7 (highest)
+		let prio_address = *base_ptr + irq_number as usize * 4;
+		core::ptr::write_volatile(prio_address as *mut u32, 1);
+		// Set Threshold to 0 (lowest)
+		let thresh_address = *base_ptr + 0x20_2000;
+		core::ptr::write_volatile(thresh_address as *mut u32, 0);
+		// Enable irq for Hart 1 S-Mode
+		let enable_address = *base_ptr + PLIC_ENABLE_OFFSET + 0x100 + ((irq_number/32)*4) as usize;
+		debug!("enable_address {:x}", enable_address);
+		core::ptr::write_volatile(enable_address as *mut u32, 1 << (irq_number % 32));
+	}
 }
 
 // Derived from rCore: https://github.com/rcore-os/rCore
@@ -122,14 +164,15 @@ pub extern "C" fn trap_handler(tf: &mut TrapFrame) {
     let scause = scause::read();
     let stval = stval::read();
 	let sepc = sepc::read();
-    //trace!("Interrupt @ CPU{}: {:?} ", super::cpu::id(), scause.cause());
 	trace!("Interrupt: {:?} ", scause.cause());
 	trace!("tf: {:x?} ", tf);
 	trace!("stvall: {:x}", stval);
 	trace!("sepc: {:x}", sepc);
+	trace!("SSTATUS FS: {:?}", sstatus::read().fs());
+	trace!("FCSR: {:?}", fcsr::read());
 	//loop{}
     match scause.cause() {
-        //Trap::Interrupt(I::SupervisorExternal) => external(),
+        Trap::Interrupt(I::SupervisorExternal) => external_handler(),
 		#[cfg(feature = "smp")]
         Trap::Interrupt(I::SupervisorSoft) => crate::arch::riscv::kernel::scheduler::wakeup_handler(),
         Trap::Interrupt(I::SupervisorTimer) => crate::arch::riscv::kernel::scheduler::timer_handler(),
@@ -139,4 +182,40 @@ pub extern "C" fn trap_handler(tf: &mut TrapFrame) {
         _ => panic!("unhandled trap {:?}", scause.cause()),
     }
     trace!("Interrupt end");
+}
+
+
+/// Handles external interrupts
+fn external_handler() {
+	unsafe {
+		let handler: Option<fn()> = {
+			// Claim interrupt
+			let base_ptr = PLIC_BASE.lock();
+			let claim_address = *base_ptr + 0x20_2004;
+			let irq = core::ptr::read_volatile(claim_address as *mut u32);
+			if irq != 0 {
+				debug!("External INT: {}",irq);
+				// Complete interrupt
+				core::ptr::write_volatile(claim_address as *mut u32, irq);
+
+				// Call handler
+				if IRQ_HANDLERS[irq as usize - 1] != 0 {
+					let ptr = IRQ_HANDLERS[irq as usize - 1] as *const ();
+					let handler: fn() = unsafe { core::mem::transmute(ptr) };
+					Some(handler)
+				}
+				else {
+					error!("Interrupt handler not installed");
+					None
+				}
+			}
+			else {
+				None
+			}
+		};
+
+		if let Some(handler) = handler {
+			handler();
+		}
+	}
 }

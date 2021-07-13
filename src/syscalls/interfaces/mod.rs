@@ -13,6 +13,10 @@ use core::convert::{TryFrom, TryInto};
 use core::{isize, ptr, slice, str};
 
 use crate::arch;
+#[cfg(all(feature = "pci", not(target_arch = "riscv64")))]
+use crate::arch::kernel::pci::get_network_driver;
+#[cfg(target_arch = "riscv64")]
+use crate::arch::kernel::mmio::get_network_driver;
 use crate::console::CONSOLE;
 use crate::environment;
 use crate::errno::*;
@@ -115,75 +119,75 @@ pub trait SyscallInterface: Send + Sync {
 	}
 
 	fn get_mac_address(&self) -> Result<[u8; 6], ()> {
-		#[cfg(all(feature = "pci", not(target_arch = "aarch64")))]
-		match arch::kernel::pci::get_network_driver() {
+		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		match get_network_driver() {
 			Some(driver) => Ok(driver.lock().get_mac_address()),
 			_ => Err(()),
 		}
-		#[cfg(not(all(feature = "pci", not(target_arch = "aarch64"))))]
+		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
 		Err(())
 	}
 
 	fn get_mtu(&self) -> Result<u16, ()> {
-		#[cfg(all(feature = "pci", not(target_arch = "aarch64")))]
-		match arch::kernel::pci::get_network_driver() {
+		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		match get_network_driver() {
 			Some(driver) => Ok(driver.lock().get_mtu()),
 			_ => Err(()),
 		}
-		#[cfg(not(all(feature = "pci", not(target_arch = "aarch64"))))]
+		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
 		Err(())
 	}
 
 	fn has_packet(&self) -> bool {
-		#[cfg(all(feature = "pci", not(target_arch = "aarch64")))]
-		match arch::kernel::pci::get_network_driver() {
+		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		match get_network_driver() {
 			Some(driver) => driver.lock().has_packet(),
 			_ => false,
 		}
-		#[cfg(not(all(feature = "pci", not(target_arch = "aarch64"))))]
+		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
 		false
 	}
 
 	fn get_tx_buffer(&self, len: usize) -> Result<(*mut u8, usize), ()> {
-		#[cfg(all(feature = "pci", not(target_arch = "aarch64")))]
-		match arch::kernel::pci::get_network_driver() {
+		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		match get_network_driver() {
 			Some(driver) => driver.lock().get_tx_buffer(len),
 			_ => Err(()),
 		}
-		#[cfg(not(all(feature = "pci", not(target_arch = "aarch64"))))]
+		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
 		Err(())
 	}
 
 	fn send_tx_buffer(&self, handle: usize, len: usize) -> Result<(), ()> {
-		#[cfg(all(feature = "pci", not(target_arch = "aarch64")))]
-		match arch::kernel::pci::get_network_driver() {
+		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		match get_network_driver() {
 			Some(driver) => driver.lock().send_tx_buffer(handle, len),
 			_ => Err(()),
 		}
-		#[cfg(not(all(feature = "pci", not(target_arch = "aarch64"))))]
+		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
 		Err(())
 	}
 
 	fn receive_rx_buffer(&self) -> Result<(&'static [u8], usize), ()> {
-		#[cfg(all(feature = "pci", not(target_arch = "aarch64")))]
-		match arch::kernel::pci::get_network_driver() {
+		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		match get_network_driver() {
 			Some(driver) => driver.lock().receive_rx_buffer(),
 			_ => Err(()),
 		}
-		#[cfg(not(all(feature = "pci", not(target_arch = "aarch64"))))]
+		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
 		Err(())
 	}
 
 	fn rx_buffer_consumed(&self, handle: usize) -> Result<(), ()> {
-		#[cfg(all(feature = "pci", not(target_arch = "aarch64")))]
-		match arch::kernel::pci::get_network_driver() {
+		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		match get_network_driver() {
 			Some(driver) => {
 				driver.lock().rx_buffer_consumed(handle);
 				Ok(())
 			}
 			_ => Err(()),
 		}
-		#[cfg(not(all(feature = "pci", not(target_arch = "aarch64"))))]
+		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
 		Err(())
 	}
 

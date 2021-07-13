@@ -11,15 +11,17 @@ pub mod rtl8139;
 #[cfg(feature = "pci")]
 pub mod virtio_net;
 
-// #[cfg(target_arch = "riscv64")]
-// pub mod cadence_gem;
+#[cfg(target_arch = "riscv64")]
+pub mod gem;
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::kernel::apic;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::kernel::irq::ExceptionStackFrame;
-#[cfg(feature = "pci")]
-use crate::arch::kernel::pci;
+#[cfg(all(feature = "pci", not(target_arch = "riscv64")))]
+use crate::arch::kernel::pci::get_network_driver;
+#[cfg(target_arch = "riscv64")]
+use crate::arch::kernel::mmio::get_network_driver;
 use crate::arch::kernel::percore::*;
 use crate::synch::semaphore::*;
 use crate::synch::spinlock::SpinlockIrqSave;
@@ -88,8 +90,7 @@ pub extern "x86-interrupt" fn network_irqhandler(_stack_frame: ExceptionStackFra
 	debug!("Receive network interrupt");
 	apic::eoi();
 
-	#[cfg(feature = "pci")]
-	let check_scheduler = match pci::get_network_driver() {
+	let check_scheduler = match get_network_driver() {
 		Some(driver) => driver.lock().handle_interrupt(),
 		_ => {
 			debug!("Unable to handle interrupt!");
@@ -98,6 +99,24 @@ pub extern "x86-interrupt" fn network_irqhandler(_stack_frame: ExceptionStackFra
 	};
 	#[cfg(not(feature = "pci"))]
 	let check_scheduler = false;
+
+	if check_scheduler {
+		core_scheduler().scheduler();
+	}
+}
+
+#[cfg(target_arch = "riscv64")]
+pub fn network_irqhandler() {
+	debug!("Receive network interrupt");
+
+	let check_scheduler = match get_network_driver() {
+		Some(driver) => {driver.lock().handle_interrupt()
+		},
+		_ => {
+			debug!("Unable to handle interrupt!");
+			false
+		}
+	};
 
 	if check_scheduler {
 		core_scheduler().scheduler();

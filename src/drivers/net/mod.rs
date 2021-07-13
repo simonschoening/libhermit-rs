@@ -11,15 +11,17 @@ pub mod rtl8139;
 #[cfg(all(feature = "pci", not(target_arch = "aarch64")))]
 pub mod virtio_net;
 
-// #[cfg(target_arch = "riscv64")]
-// pub mod cadence_gem;
+#[cfg(target_arch = "riscv64")]
+pub mod gem;
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::kernel::apic;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::kernel::irq::ExceptionStackFrame;
-#[cfg(feature = "pci")]
-use crate::arch::kernel::pci;
+#[cfg(all(feature = "pci", not(target_arch = "riscv64")))]
+use crate::arch::kernel::pci::get_network_driver;
+#[cfg(target_arch = "riscv64")]
+use crate::arch::kernel::mmio::get_network_driver;
 use crate::arch::kernel::percore::*;
 use crate::scheduler::task::TaskHandle;
 use crate::synch::semaphore::*;
@@ -61,8 +63,8 @@ const POLL_PERIOD: u64 = 20_000;
 fn set_polling_mode(value: bool) {
 	// is the driver already in polling mode?
 	if POLLING.swap(value, Ordering::SeqCst) != value {
-		#[cfg(feature = "pci")]
-		if let Some(driver) = crate::arch::kernel::pci::get_network_driver() {
+		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		if let Some(driver) = get_network_driver() {
 			driver.lock().set_polling_mode(value)
 		}
 
@@ -103,8 +105,8 @@ pub fn netwait_and_wakeup(handles: &[usize], millis: Option<u64>) {
 	}
 
 	if reset_nic {
-		#[cfg(feature = "pci")]
-		if let Some(driver) = crate::arch::kernel::pci::get_network_driver() {
+		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		if let Some(driver) = get_network_driver() {
 			driver.lock().set_polling_mode(false);
 		};
 	} else {
@@ -151,8 +153,26 @@ pub extern "x86-interrupt" fn network_irqhandler(_stack_frame: &mut ExceptionSta
 	debug!("Receive network interrupt");
 	apic::eoi();
 
-	let check_scheduler = match pci::get_network_driver() {
+	let check_scheduler = match get_network_driver() {
 		Some(driver) => driver.lock().handle_interrupt(),
+		_ => {
+			debug!("Unable to handle interrupt!");
+			false
+		}
+	};
+
+	if check_scheduler {
+		core_scheduler().scheduler();
+	}
+}
+
+#[cfg(target_arch = "riscv64")]
+pub fn network_irqhandler() {
+	debug!("Receive network interrupt");
+
+	let check_scheduler = match get_network_driver() {
+		Some(driver) => {driver.lock().handle_interrupt()
+		},
 		_ => {
 			debug!("Unable to handle interrupt!");
 			false

@@ -7,6 +7,7 @@
 // copied, modified, or distributed except according to those terms.
 
 pub mod irq;
+pub mod mmio;
 pub mod pci;
 pub mod percore;
 pub mod processor;
@@ -14,8 +15,10 @@ pub mod scheduler;
 pub mod serial;
 mod start;
 mod sbi;
+mod devicetree;
 pub mod systemtime;
 
+pub use crate::arch::riscv::kernel::devicetree::{get_mem_base, init_drivers};
 use crate::arch::riscv::kernel::percore::*;
 use crate::arch::riscv::kernel::serial::SerialPort;
 use crate::arch::riscv::kernel::processor::lsb;
@@ -23,10 +26,10 @@ pub use crate::arch::riscv::kernel::systemtime::get_boot_time;
 use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
 use crate::arch::riscv::mm::physicalmem;
 use crate::arch::riscv::mm::paging;
+use hermit_dtb::Dtb;
 use crate::config::*;
 use crate::environment;
 use crate::kernel_message_buffer;
-use crate::synch::spinlock::Spinlock;
 use core::{intrinsics, ptr, mem};
 use core::fmt;
 use riscv::register::{sstatus, fcsr};
@@ -38,7 +41,6 @@ const SERIAL_PORT_BAUDRATE: u32 = 115200;
 const BOOTINFO_MAGIC_NUMBER: u32 = 0xC0DE_CAFEu32;
 
 static mut COM1: SerialPort = SerialPort::new(0x9000000);
-static CPU_ONLINE: Spinlock<u32> = Spinlock::new(0);
 
 // Used to store information about available harts. The index of the hart in the vector
 // represents its CpuId and does not need to match its hart_id
@@ -73,9 +75,9 @@ struct BootInfo {
 	pub hcip: [u8; 4],
 	pub hcgateway: [u8; 4],
 	pub hcmask: [u8; 4],
-	pub timebase_freq: u64,
-	pub mem_base: u64,
+	pub dtb_ptr: u64,
 	pub hart_mask: u64,
+	pub timebase_freq: u64,
 }
 
 impl fmt::Debug for BootInfo {
@@ -110,9 +112,9 @@ impl fmt::Debug for BootInfo {
 		writeln!(f, "uartport 0x{:x}", self.uartport)?;
 		writeln!(f, "single_kernel {}", self.single_kernel)?;
 		writeln!(f, "uhyve {}", self.uhyve)?;
-		writeln!(f, "timebase_freq {}", self.timebase_freq)?;
-		writeln!(f, "mem_base {}", self.mem_base)?;
-		writeln!(f, "hart_mask {}", self.hart_mask)
+		writeln!(f, "dtb_ptr {:x}", self.dtb_ptr)?;
+		writeln!(f, "hart_mask {}", self.hart_mask)?;
+		writeln!(f, "timebase_freq {}", self.timebase_freq)
 	}
 }
 
@@ -180,16 +182,16 @@ pub fn get_cmdline() -> VirtAddr {
 	VirtAddr(unsafe { core::ptr::read_volatile(&(*BOOT_INFO).cmdline) })
 }
 
-pub fn get_timebase_freq() -> u64 {
-	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).timebase_freq) as u64 }
-}
-
-pub fn get_mem_base() -> PhysAddr {
-	PhysAddr(unsafe { core::ptr::read_volatile(&(*BOOT_INFO).mem_base) })
+pub fn get_dtb_ptr() -> *const u8{
+	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).dtb_ptr) as *const u8}
 }
 
 pub fn get_hart_mask() -> u64 {
 	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).hart_mask) }
+}
+
+pub fn get_timebase_freq() -> u64 {
+	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).timebase_freq) as u64 }
 }
 
 pub fn get_current_boot_id() -> u32 {
@@ -235,11 +237,12 @@ pub fn output_message_buf(buf: &[u8]) {
 
 /// Real Boot Processor initialization as soon as we have put the first Welcome message on the screen.
 pub fn boot_processor_init() {
+	devicetree::init();
 	crate::mm::init();
 	crate::mm::print_information();
 	environment::init();
-
 	irq::install();
+	//devicetree::init_drivers();
 	
 	/*processor::detect_features();
 	processor::configure();
@@ -325,16 +328,9 @@ extern "C" {
 
 /// Application Processor initialization
 pub fn application_processor_init() {
-	//processor::halt();
 	percore::init();
 	paging::init_application_processor();
 	irq::install();
-	/*processor::configure();
-	gdt::add_current_core();
-	idt::install();
-	apic::init_x2apic();
-	apic::init_local_apic();
-	irq::enable();*/
 	finish_processor_init();
 	irq::enable();
 }
@@ -380,10 +376,12 @@ fn finish_processor_init() {
 			"fmv.s.x	f31, zero",
 			"csrw	fcsr, 0",
 		);
+
+		sstatus::set_fs(sstatus::FS::Initial);
 		
 	}
-	info!("FCSR: {:?}", fcsr::read());
 	info!("SSTATUS FS: {:?}", sstatus::read().fs());
+	info!("FCSR: {:?}", fcsr::read());
 	/*if environment::is_uhyve() {
 		// uhyve does not use apic::detect_from_acpi and therefore does not know the number of processors and
 		// their APIC IDs in advance.

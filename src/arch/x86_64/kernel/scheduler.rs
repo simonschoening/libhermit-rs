@@ -84,6 +84,11 @@ pub enum TaskStacks {
 }
 
 impl TaskStacks {
+	/// Size of the debug marker at the very top of each stack.
+	///
+	/// We have a marker at the very top of the stack for debugging (`0xdeadbeef`), which should not be overridden.
+	pub const MARKER_SIZE: usize = 0x10;
+
 	pub fn new(size: usize) -> TaskStacks {
 		let user_stack_size = if size < KERNEL_STACK_SIZE {
 			KERNEL_STACK_SIZE
@@ -148,9 +153,11 @@ impl TaskStacks {
 
 	pub fn from_boot_stacks() -> TaskStacks {
 		let tss = unsafe { &(*PERCORE.tss.get()) };
-		let stack = VirtAddr::from_usize(tss.rsp[0] as usize + 0x10 - KERNEL_STACK_SIZE);
+		let stack =
+			VirtAddr::from_usize(tss.rsp[0] as usize + Self::MARKER_SIZE - KERNEL_STACK_SIZE);
 		debug!("Using boot stack {:#X}", stack);
-		let ist0 = VirtAddr::from_usize(tss.ist[0] as usize + 0x10 - KERNEL_STACK_SIZE);
+		let ist0 =
+			VirtAddr::from_usize(tss.ist[0] as usize + Self::MARKER_SIZE - KERNEL_STACK_SIZE);
 		debug!("IST0 is located at {:#X}", ist0);
 
 		TaskStacks::Boot(BootStack { stack, ist0 })
@@ -292,7 +299,7 @@ impl TaskTLS {
 		Self {
 			address: ptr,
 			fs: tls_pointer,
-			layout: layout,
+			layout,
 		}
 	}
 
@@ -327,22 +334,34 @@ impl Clone for TaskTLS {
 }
 
 #[cfg(not(target_os = "hermit"))]
-extern "C" fn task_start(func: extern "C" fn(usize), arg: usize, user_stack: u64) {}
-
-#[cfg(target_os = "hermit")]
-extern "C" {
-	fn task_start(func: extern "C" fn(usize), arg: usize, user_stack: u64);
+extern "C" fn task_start(_f: extern "C" fn(usize), _arg: usize, _user_stack: u64) -> ! {
+	unimplemented!()
 }
 
-#[inline(never)]
-#[no_mangle]
+#[cfg(target_os = "hermit")]
+#[naked]
+extern "C" fn task_start(_f: extern "C" fn(usize), _arg: usize, _user_stack: u64) -> ! {
+	// `f` is in the `rdi` register
+	// `arg` is in the `rsi` register
+	// `user_stack` is in the `rdx` register
+
+	unsafe {
+		asm!(
+			"mov rsp, rdx",
+			"sti",
+			"jmp {task_entry}",
+			task_entry = sym task_entry,
+			options(noreturn)
+		)
+	}
+}
+
 extern "C" fn task_entry(func: extern "C" fn(usize), arg: usize) -> ! {
 	// Call the actual entry point of the task.
 	func(arg);
-	switch_to_kernel!();
 
 	// Exit task
-	core_scheduler().exit(0)
+	crate::sys_thread_exit(0)
 }
 
 impl TaskFrame for Task {
@@ -356,8 +375,8 @@ impl TaskFrame for Task {
 
 		unsafe {
 			// Set a marker for debugging at the very top.
-			let mut stack =
-				self.stacks.get_kernel_stack() + self.stacks.get_kernel_stack_size() - 0x10u64;
+			let mut stack = self.stacks.get_kernel_stack() + self.stacks.get_kernel_stack_size()
+				- TaskStacks::MARKER_SIZE;
 			*stack.as_mut_ptr::<u64>() = 0xDEAD_BEEFu64;
 
 			// Put the State structure expected by the ASM switch() function on the stack.
@@ -369,8 +388,8 @@ impl TaskFrame for Task {
 			if let Some(tls) = &self.tls {
 				(*state).fs = tls.get_fs().as_u64();
 			}
-			(*state).rip = task_start as u64;
-			(*state).rdi = func as u64;
+			(*state).rip = task_start as usize as u64;
+			(*state).rdi = func as usize as u64;
 			(*state).rsi = arg as u64;
 
 			// per default we disable interrupts
@@ -378,8 +397,9 @@ impl TaskFrame for Task {
 
 			// Set the task's stack pointer entry to the stack we have just crafted.
 			self.last_stack_pointer = stack;
-			self.user_stack_pointer =
-				self.stacks.get_user_stack() + self.stacks.get_user_stack_size() - 0x10u64;
+			self.user_stack_pointer = self.stacks.get_user_stack()
+				+ self.stacks.get_user_stack_size()
+				- TaskStacks::MARKER_SIZE;
 
 			// rdx is required to intialize the stack
 			(*state).rdx = self.user_stack_pointer.as_u64() - mem::size_of::<u64>() as u64;
@@ -387,7 +407,7 @@ impl TaskFrame for Task {
 	}
 }
 
-extern "x86-interrupt" fn timer_handler(_stack_frame: &mut irq::ExceptionStackFrame) {
+extern "x86-interrupt" fn timer_handler(_stack_frame: irq::ExceptionStackFrame) {
 	increment_irq_counter(apic::TIMER_INTERRUPT_NUMBER.into());
 	core_scheduler().handle_waiting_tasks();
 	apic::eoi();

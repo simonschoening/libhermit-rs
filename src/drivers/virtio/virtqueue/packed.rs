@@ -8,26 +8,24 @@
 //! This module contains Virtio's packed virtqueue.
 //! See Virito specification v1.1. - 2.7
 #![allow(dead_code)]
-#![allow(unused)]
 
 use self::error::VqPackedError;
 use super::super::features::Features;
-use super::super::transport::pci::{ComCfg, IsrStatus, NotifCfg, NotifCtrl};
+use super::super::transport::pci::{ComCfg, NotifCfg, NotifCtrl};
 use super::error::VirtqError;
 use super::{
-	AsSliceU8, BuffSpec, Buffer, BufferToken, Bytes, DescrFlags, MemDescr, MemDescrId, MemPool,
-	Pinned, Transfer, TransferState, TransferToken, Virtq, VqIndex, VqSize,
+	AsSliceU8, BuffSpec, Buffer, BufferToken, Bytes, DescrFlags, MemDescr, MemPool, Pinned,
+	Transfer, TransferState, TransferToken, Virtq, VqIndex, VqSize,
 };
 use crate::arch::mm::paging::{BasePageSize, PageSize};
-use crate::arch::mm::{paging, virtualmem, PhysAddr, VirtAddr};
+use crate::arch::mm::{paging, VirtAddr};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
-use core::cell::RefCell;
 use core::convert::TryFrom;
-use core::ops::Deref;
 use core::sync::atomic::{fence, Ordering};
+use core::{cell::RefCell, ptr};
 
 /// A newtype of bool used for convenience in context with
 /// packed queues wrap counter.
@@ -42,7 +40,7 @@ impl WrapCount {
 		1 << 7 | 1 << 15
 	}
 
-	/// Returns a new WrapCount struct initalized to true or 1.
+	/// Returns a new WrapCount struct initialized to true or 1.
 	///
 	/// See virtio specification v1.1. - 2.7.1
 	fn new() -> Self {
@@ -54,11 +52,7 @@ impl WrapCount {
 	/// If WrapCount(true) returns WrapCount(false),
 	/// if WrapCount(false) returns WrapCount(true).
 	fn wrap(&mut self) {
-		if self.0 == false {
-			self.0 = true;
-		} else {
-			self.0 = false;
-		}
+		self.0 = !self.0
 	}
 
 	/// Creates avail and used flags inside u16 in accordance to the
@@ -67,7 +61,7 @@ impl WrapCount {
 	/// I.e.: Set avail flag to match the WrapCount and the used flag
 	/// to NOT match the WrapCount.
 	fn as_flags_avail(&self) -> u16 {
-		if self.0 == true {
+		if self.0 {
 			1 << 7
 		} else {
 			1 << 15
@@ -80,7 +74,7 @@ impl WrapCount {
 	/// I.e.: Set avail flag to match the WrapCount and the used flag
 	/// to also match the WrapCount.
 	fn as_flags_used(&self) -> u16 {
-		if self.0 == true {
+		if self.0 {
 			1 << 7 | 1 << 15
 		} else {
 			0
@@ -126,7 +120,7 @@ impl DescriptorRing {
 		// Descriptor ID's run from 1 to size_of_queue. In order to index directly into the
 		// refernece ring via an ID it is much easier to simply have an array of size = size_of_queue + 1
 		// and do not care about the first element beeing unused.
-		let tkn_ref_ring = vec![0usize as *mut TransferToken; size + 1].into_boxed_slice();
+		let tkn_ref_ring = vec![ptr::null_mut(); size + 1].into_boxed_slice();
 
 		DescriptorRing {
 			ring,
@@ -171,9 +165,9 @@ impl DescriptorRing {
 		&mut self,
 		tkn_lst: Vec<TransferToken>,
 	) -> (Vec<Pinned<TransferToken>>, usize, u8) {
-		// Catch empty push, in order to allow zero initalized first_ctrl_settings struct
+		// Catch empty push, in order to allow zero initialized first_ctrl_settings struct
 		// which will be overwritten in the first iteration of the for-loop
-		assert!(tkn_lst.len() > 0);
+		assert!(!tkn_lst.is_empty());
 
 		let mut first_ctrl_settings: (usize, u16, WrapCount) = (0, 0, WrapCount::new());
 		let mut pind_lst = Vec::with_capacity(tkn_lst.len());
@@ -444,9 +438,9 @@ impl DescriptorRing {
 		self.ring.as_ptr() as usize
 	}
 
-	/// Returns an initalized write controler in order
+	/// Returns an initialized write controler in order
 	/// to write the queue correctly.
-	fn get_write_ctrler(&mut self) -> WriteCtrl {
+	fn get_write_ctrler(&mut self) -> WriteCtrl<'_> {
 		WriteCtrl {
 			start: self.write_index,
 			position: self.write_index,
@@ -458,9 +452,9 @@ impl DescriptorRing {
 		}
 	}
 
-	/// Returns an initalized read controler in order
+	/// Returns an initialized read controler in order
 	/// to read the queue correctly.
-	fn get_read_ctrler(&mut self) -> ReadCtrl {
+	fn get_read_ctrler(&mut self) -> ReadCtrl<'_> {
 		ReadCtrl {
 			position: self.poll_index,
 			modulo: self.ring.len(),
@@ -486,25 +480,23 @@ impl<'a> ReadCtrl<'a> {
 		if self.desc_ring.ring[self.position].flags & WrapCount::flag_mask()
 			== self.desc_ring.dev_wc.as_flags_used()
 		{
-			let tkn;
-			let recv_buff_opt;
-			let send_buff_opt;
-
-			unsafe {
-				let raw_tkn = self.desc_ring.tkn_ref_ring
-					[usize::try_from(self.desc_ring.ring[self.position].buff_id).unwrap()];
-				assert!(!raw_tkn.is_null());
-				tkn = &mut *(raw_tkn);
-
+			let tkn = unsafe {
+				let buff_id = usize::from(self.desc_ring.ring[self.position].buff_id);
+				let raw_tkn = self.desc_ring.tkn_ref_ring[buff_id];
 				// unset the reference in the refernce ring for security!
-				self.desc_ring.tkn_ref_ring
-					[usize::try_from(self.desc_ring.ring[self.position].buff_id).unwrap()] = 0 as *mut TransferToken;
-				// This is perfectly fine, as we operate on two different datastructures inside one datastructure.
-				let raw_ptr =
-					(tkn.buff_tkn.as_ref().unwrap() as *const BufferToken) as *mut BufferToken;
-				recv_buff_opt = &mut (*raw_ptr).recv_buff;
-				send_buff_opt = &mut (*raw_ptr).send_buff;
-			}
+				self.desc_ring.tkn_ref_ring[buff_id] = ptr::null_mut();
+				assert!(!raw_tkn.is_null());
+				&mut *raw_tkn
+			};
+
+			let (send_buff, recv_buff) = {
+				let BufferToken {
+					send_buff,
+					recv_buff,
+					..
+				} = tkn.buff_tkn.as_mut().unwrap();
+				(recv_buff.as_mut(), send_buff.as_mut())
+			};
 
 			// Retrieve if any has been written to the queue. If this is the case, we calculate the overall length
 			// This is necessary in order to provide the drivers with the correct access, to usable data.
@@ -525,7 +517,7 @@ impl<'a> ReadCtrl<'a> {
 			// flag correctly upon writes. Hence we omit it, in order to receive data.
 			let write_len = self.desc_ring.ring[self.position].len;
 
-			match (send_buff_opt, recv_buff_opt) {
+			match (send_buff, recv_buff) {
 				(Some(send_buff), Some(recv_buff)) => {
 					// Need to only check for either send or receive buff to contain
 					// a ctrl_desc as, both carry the same if they carry one.
@@ -571,12 +563,7 @@ impl<'a> ReadCtrl<'a> {
 	) {
 		match (send_buff, recv_buff_spec) {
 			(Some(send_buff), Some((recv_buff, mut write_len))) => {
-				// This is perfectly fine as we operate on two different datastructures inside one datastructure
-				// we can have two mutable references via the same wrapping datastructure
-				let ctrl_desc = unsafe {
-					let raw_ref = &mut *((send_buff as *const Buffer) as *mut Buffer);
-					raw_ref.get_ctrl_desc_mut().unwrap()
-				};
+				let ctrl_desc = send_buff.get_ctrl_desc_mut().unwrap();
 
 				// This should read the descriptors inside the ctrl desc memory and update the memory
 				// accordingly
@@ -590,7 +577,7 @@ impl<'a> ReadCtrl<'a> {
 
 				let mut desc_iter = desc_slice.iter_mut();
 
-				for desc in send_buff.as_mut_slice() {
+				for _desc in send_buff.as_mut_slice() {
 					// Unwrapping is fine here, as lists must be of same size and same ordering
 					desc_iter.next().unwrap();
 				}
@@ -613,12 +600,7 @@ impl<'a> ReadCtrl<'a> {
 				}
 			}
 			(Some(send_buff), None) => {
-				// This is perfectly fine as we operate on two different datastructures inside one datastructure
-				// we can have two mutable references via the same wrapping datastructure
-				let ctrl_desc = unsafe {
-					let raw_ref = &mut *((send_buff as *const Buffer) as *mut Buffer);
-					raw_ref.get_ctrl_desc_mut().unwrap()
-				};
+				let ctrl_desc = send_buff.get_ctrl_desc_mut().unwrap();
 
 				// This should read the descriptors inside the ctrl desc memory and update the memory
 				// accordingly
@@ -630,20 +612,15 @@ impl<'a> ReadCtrl<'a> {
 					)
 				};
 
-				let mut desc_iter = desc_slice.into_iter();
+				let mut desc_iter = desc_slice.iter();
 
-				for desc in send_buff.as_mut_slice() {
+				for _desc in send_buff.as_mut_slice() {
 					// Unwrapping is fine here, as lists must be of same size and same ordering
 					desc_iter.next().unwrap();
 				}
 			}
 			(None, Some((recv_buff, mut write_len))) => {
-				// This is perfectly fine as we operate on two different datastructures inside one datastructure
-				// we can have two mutable references via the same wrapping datastructure
-				let ctrl_desc = unsafe {
-					let raw_ref = &mut *((recv_buff as *const Buffer) as *mut Buffer);
-					raw_ref.get_ctrl_desc_mut().unwrap()
-				};
+				let ctrl_desc = recv_buff.get_ctrl_desc_mut().unwrap();
 
 				// This should read the descriptors inside the ctrl desc memory and update the memory
 				// accordingly
@@ -725,7 +702,7 @@ impl<'a> ReadCtrl<'a> {
 	/// Updates the descriptor flags inside the actual ring if necessary and
 	/// increments the poll_index by one.
 	fn update_send(&mut self, send_buff: &mut Buffer) {
-		for desc in send_buff.as_slice() {
+		for _desc in send_buff.as_slice() {
 			// Increase poll_index and reset ring position beforehand in order to have a consistent and clean
 			// data structure.
 			self.reset_ring_pos();
@@ -839,6 +816,7 @@ impl<'a> WriteCtrl<'a> {
 	}
 }
 
+#[derive(Clone, Copy)]
 #[repr(C, align(16))]
 struct Descriptor {
 	address: u64,
@@ -858,42 +836,27 @@ impl Descriptor {
 	}
 
 	fn to_le_bytes(self) -> [u8; 16] {
-		let mut desc_bytes_cnt = 0usize;
 		// 128 bits long raw descriptor bytes
 		let mut desc_bytes: [u8; 16] = [0; 16];
 
 		// Call to little endian, as device will read this and
 		// Virtio devices are inherently little endian coded.
 		let mem_addr: [u8; 8] = self.address.to_le_bytes();
-		// Write address as bytes in raw
-		for byte in 0..8 {
-			desc_bytes[desc_bytes_cnt] = mem_addr[byte];
-			desc_bytes_cnt += 1;
-		}
+		desc_bytes[0..8].copy_from_slice(&mem_addr);
 
 		// Must be 32 bit in order to fulfill specification.
 		// MemPool.pull and .pull_untracked ensure this automatically
 		// which makes this cast safe.
 		let mem_len: [u8; 4] = self.len.to_le_bytes();
-		// Write length of memory area as bytes in raw
-		for byte in 0..4 {
-			desc_bytes[desc_bytes_cnt] = mem_len[byte];
-			desc_bytes_cnt += 1;
-		}
+		desc_bytes[8..12].copy_from_slice(&mem_len);
 
 		// Write BuffID as bytes in raw.
 		let id: [u8; 2] = self.buff_id.to_le_bytes();
-		for byte in 0..2usize {
-			desc_bytes[desc_bytes_cnt] = id[byte];
-			desc_bytes_cnt += 1;
-		}
+		desc_bytes[12..14].copy_from_slice(&id);
 
 		// Write flags as bytes in raw.
 		let flags: [u8; 2] = self.flags.to_le_bytes();
-		// Write of flags as bytes in raw
-		for byte in 0..2usize {
-			desc_bytes[desc_bytes_cnt] = flags[byte];
-		}
+		desc_bytes[14..16].copy_from_slice(&flags);
 
 		desc_bytes
 	}
@@ -954,7 +917,7 @@ struct DevNotif {
 }
 
 impl EventSuppr {
-	/// Returns a zero initalized EventSuppr structure
+	/// Returns a zero initialized EventSuppr structure
 	fn new() -> Self {
 		EventSuppr { event: 0, flags: 0 }
 	}
@@ -1083,7 +1046,7 @@ impl PackedVq {
 	/// updated notification flags before finishing transfers!
 	pub fn dispatch_batch(&self, tkns: Vec<TransferToken>, notif: bool) -> Vec<Transfer> {
 		// Zero transfers are not allowed
-		assert!(tkns.len() > 0);
+		assert!(!tkns.is_empty());
 
 		let (pin_tkn_lst, next_off, next_wrap) = self.descr_ring.borrow_mut().push_batch(tkns);
 
@@ -1143,7 +1106,7 @@ impl PackedVq {
 		notif: bool,
 	) {
 		// Zero transfers are not allowed
-		assert!(tkns.len() > 0);
+		assert!(!tkns.is_empty());
 
 		// We have to iterate here too, in order to ensure, tokens are placed into the await_queue
 		for tkn in tkns.iter_mut() {
@@ -1331,10 +1294,10 @@ impl PackedVq {
 			drv_event.borrow_mut().f_notif_idx = true;
 		}
 
-		// Initalize new memory pool.
+		// Initialize new memory pool.
 		let mem_pool = Rc::new(MemPool::new(vq_size));
 
-		// Initalize an empty vector for future dropped transfers
+		// Initialize an empty vector for future dropped transfers
 		let dropped: RefCell<Vec<Pinned<TransferToken>>> = RefCell::new(Vec::new());
 
 		vq_handler.enable_queue();
@@ -1357,11 +1320,11 @@ impl PackedVq {
 	pub fn prep_transfer_from_raw<T: AsSliceU8 + 'static, K: AsSliceU8 + 'static>(
 		&self,
 		master: Rc<Virtq>,
-		send: Option<(*mut T, BuffSpec)>,
-		recv: Option<(*mut K, BuffSpec)>,
+		send: Option<(*mut T, BuffSpec<'_>)>,
+		recv: Option<(*mut K, BuffSpec<'_>)>,
 	) -> Result<TransferToken, VirtqError> {
 		match (send, recv) {
-			(None, None) => return Err(VirtqError::BufferNotSpecified),
+			(None, None) => Err(VirtqError::BufferNotSpecified),
 			(Some((send_data, send_spec)), None) => {
 				match send_spec {
 					BuffSpec::Single(size) => {
@@ -1418,7 +1381,7 @@ impl PackedVq {
 							};
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						Ok(TransferToken {
@@ -1456,7 +1419,7 @@ impl PackedVq {
 							);
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						let ctrl_desc = match self.create_indirect_ctrl(Some(&desc_lst), None) {
@@ -1469,7 +1432,7 @@ impl PackedVq {
 							buff_tkn: Some(BufferToken {
 								send_buff: Some(Buffer::Indirect {
 									desc_lst: desc_lst.into_boxed_slice(),
-									ctrl_desc: ctrl_desc,
+									ctrl_desc,
 									len: data_slice.len(),
 									next_write: 0,
 								}),
@@ -1540,7 +1503,7 @@ impl PackedVq {
 							};
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						Ok(TransferToken {
@@ -1578,7 +1541,7 @@ impl PackedVq {
 							);
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						let ctrl_desc = match self.create_indirect_ctrl(None, Some(&desc_lst)) {
@@ -1592,7 +1555,7 @@ impl PackedVq {
 								send_buff: None,
 								recv_buff: Some(Buffer::Indirect {
 									desc_lst: desc_lst.into_boxed_slice(),
-									ctrl_desc: ctrl_desc,
+									ctrl_desc,
 									len: data_slice.len(),
 									next_write: 0,
 								}),
@@ -1699,7 +1662,7 @@ impl PackedVq {
 							};
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						Ok(TransferToken {
@@ -1747,7 +1710,7 @@ impl PackedVq {
 							};
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						let recv_data_slice = unsafe { (*recv_data).as_slice_u8() };
@@ -1773,7 +1736,7 @@ impl PackedVq {
 							};
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						Ok(TransferToken {
@@ -1821,7 +1784,7 @@ impl PackedVq {
 							};
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						let recv_data_slice = unsafe { (*recv_data).as_slice_u8() };
@@ -1881,7 +1844,7 @@ impl PackedVq {
 							);
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						let recv_data_slice = unsafe { (*recv_data).as_slice_u8() };
@@ -1904,7 +1867,7 @@ impl PackedVq {
 							);
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						let ctrl_desc = match self
@@ -1925,7 +1888,7 @@ impl PackedVq {
 								}),
 								send_buff: Some(Buffer::Indirect {
 									desc_lst: send_desc_lst.into_boxed_slice(),
-									ctrl_desc: ctrl_desc,
+									ctrl_desc,
 									len: send_data_slice.len(),
 									next_write: 0,
 								}),
@@ -1938,13 +1901,9 @@ impl PackedVq {
 						})
 					}
 					(BuffSpec::Indirect(_), BuffSpec::Single(_))
-					| (BuffSpec::Indirect(_), BuffSpec::Multiple(_)) => {
-						return Err(VirtqError::BufferInWithDirect)
-					}
+					| (BuffSpec::Indirect(_), BuffSpec::Multiple(_)) => Err(VirtqError::BufferInWithDirect),
 					(BuffSpec::Single(_), BuffSpec::Indirect(_))
-					| (BuffSpec::Multiple(_), BuffSpec::Indirect(_)) => {
-						return Err(VirtqError::BufferInWithDirect)
-					}
+					| (BuffSpec::Multiple(_), BuffSpec::Indirect(_)) => Err(VirtqError::BufferInWithDirect),
 				}
 			}
 		}
@@ -1954,12 +1913,12 @@ impl PackedVq {
 	pub fn prep_buffer(
 		&self,
 		master: Rc<Virtq>,
-		send: Option<BuffSpec>,
-		recv: Option<BuffSpec>,
+		send: Option<BuffSpec<'_>>,
+		recv: Option<BuffSpec<'_>>,
 	) -> Result<BufferToken, VirtqError> {
 		match (send, recv) {
 			// No buffers specified
-			(None, None) => return Err(VirtqError::BufferNotSpecified),
+			(None, None) => Err(VirtqError::BufferNotSpecified),
 			// Send buffer specified, No recv buffer
 			(Some(spec), None) => {
 				match spec {
@@ -1981,7 +1940,7 @@ impl PackedVq {
 									reusable: true,
 								})
 							}
-							Err(vq_err) => return Err(vq_err),
+							Err(vq_err) => Err(vq_err),
 						}
 					}
 					BuffSpec::Multiple(size_lst) => {
@@ -2069,7 +2028,7 @@ impl PackedVq {
 									reusable: true,
 								})
 							}
-							Err(vq_err) => return Err(vq_err),
+							Err(vq_err) => Err(vq_err),
 						}
 					}
 					BuffSpec::Multiple(size_lst) => {
@@ -2349,13 +2308,9 @@ impl PackedVq {
 						})
 					}
 					(BuffSpec::Indirect(_), BuffSpec::Single(_))
-					| (BuffSpec::Indirect(_), BuffSpec::Multiple(_)) => {
-						return Err(VirtqError::BufferInWithDirect)
-					}
+					| (BuffSpec::Indirect(_), BuffSpec::Multiple(_)) => Err(VirtqError::BufferInWithDirect),
 					(BuffSpec::Single(_), BuffSpec::Indirect(_))
-					| (BuffSpec::Multiple(_), BuffSpec::Indirect(_)) => {
-						return Err(VirtqError::BufferInWithDirect)
-					}
+					| (BuffSpec::Multiple(_), BuffSpec::Indirect(_)) => Err(VirtqError::BufferInWithDirect),
 				}
 			}
 		}
@@ -2410,7 +2365,7 @@ impl PackedVq {
 		};
 
 		match (send, recv) {
-			(None, None) => return Err(VirtqError::BufferNotSpecified),
+			(None, None) => Err(VirtqError::BufferNotSpecified),
 			// Only recving descriptorsn (those are writabel by device)
 			(None, Some(recv_desc_lst)) => {
 				for desc in recv_desc_lst {

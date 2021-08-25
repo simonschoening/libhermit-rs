@@ -18,15 +18,16 @@ fn generate_park_miller_lehmer_random_number() -> u32 {
 	random
 }
 
-fn __sys_rand32() -> Option<u32> {
+#[allow(improper_ctypes_definitions)]
+extern "C" fn __sys_rand32() -> Option<u32> {
 	arch::processor::generate_random_number32()
 }
 
-fn __sys_rand64() -> Option<u64> {
-	arch::processor::generate_random_number64()
+extern "C" fn __sys_rand64(ret: &mut Option<u64>) {
+	*ret = arch::processor::generate_random_number64();
 }
 
-fn __sys_rand() -> u32 {
+extern "C" fn __sys_rand() -> u32 {
 	generate_park_miller_lehmer_random_number()
 }
 
@@ -45,7 +46,9 @@ pub fn sys_secure_rand32() -> Option<u32> {
 #[cfg(not(feature = "newlib"))]
 #[no_mangle]
 pub fn sys_secure_rand64() -> Option<u64> {
-	kernel_function!(__sys_rand64())
+	let mut ret = None;
+	kernel_function!(__sys_rand64(&mut ret));
+	ret
 }
 
 /// The function computes a sequence of pseudo-random integers
@@ -55,7 +58,7 @@ pub extern "C" fn sys_rand() -> u32 {
 	kernel_function!(__sys_rand())
 }
 
-fn __sys_srand(seed: u32) {
+extern "C" fn __sys_srand(seed: u32) {
 	*(PARK_MILLER_LEHMER_SEED.lock()) = seed;
 }
 

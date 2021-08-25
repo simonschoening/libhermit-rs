@@ -9,24 +9,39 @@
 use crate::arch;
 use crate::arch::mm::VirtAddr;
 use crate::arch::percore::*;
-use crate::arch::processor::msb;
 use crate::arch::scheduler::{TaskStacks, TaskTLS};
 use crate::scheduler::CoreId;
 use alloc::collections::{LinkedList, VecDeque};
 use alloc::rc::Rc;
 use core::cell::RefCell;
+use core::cmp::Ordering;
 use core::convert::TryInto;
 use core::fmt;
+use core::num::NonZeroU64;
+
+/// Returns the most significant bit.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(msb(0), None);
+/// assert_eq!(msb(1), 0);
+/// assert_eq!(msb(u64::MAX), 63);
+/// ```
+#[inline]
+fn msb(n: u64) -> Option<u32> {
+	NonZeroU64::new(n).map(|n| u64::BITS - 1 - n.leading_zeros())
+}
 
 /// The status of the task - used for scheduling
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TaskStatus {
-	TaskInvalid,
-	TaskReady,
-	TaskRunning,
-	TaskBlocked,
-	TaskFinished,
-	TaskIdle,
+	Invalid,
+	Ready,
+	Running,
+	Blocked,
+	Finished,
+	Idle,
 }
 
 /// Reason why wakeup() has been called on a task.
@@ -78,11 +93,9 @@ impl fmt::Display for Priority {
 
 #[allow(dead_code)]
 pub const HIGH_PRIO: Priority = Priority::from(3);
-#[allow(dead_code)]
 pub const NORMAL_PRIO: Priority = Priority::from(2);
 #[allow(dead_code)]
 pub const LOW_PRIO: Priority = Priority::from(1);
-#[allow(dead_code)]
 pub const IDLE_PRIO: Priority = Priority::from(0);
 
 /// Maximum number of priorities
@@ -116,6 +129,26 @@ impl TaskHandle {
 		self.priority
 	}
 }
+
+impl Ord for TaskHandle {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.id.cmp(&other.id)
+	}
+}
+
+impl PartialOrd for TaskHandle {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl PartialEq for TaskHandle {
+	fn eq(&self, other: &Self) -> bool {
+		self.id == other.id
+	}
+}
+
+impl Eq for TaskHandle {}
 
 /// Realize a priority queue for task handles
 pub struct TaskHandlePriorityQueue {
@@ -228,40 +261,9 @@ pub struct PriorityTaskQueue {
 impl PriorityTaskQueue {
 	/// Creates an empty priority queue for tasks
 	pub const fn new() -> PriorityTaskQueue {
+		const QUEUE_HEAD: QueueHead = QueueHead::new();
 		PriorityTaskQueue {
-			queues: [
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-				QueueHead::new(),
-			],
+			queues: [QUEUE_HEAD; NO_PRIORITIES],
 			prio_bitmap: 0,
 		}
 	}
@@ -295,30 +297,22 @@ impl PriorityTaskQueue {
 	}
 
 	fn pop_from_queue(&mut self, queue_index: usize) -> Option<Rc<RefCell<Task>>> {
-		let new_head;
-		let task;
+		let (new_head, task) = {
+			let head = self.queues[queue_index].head.as_mut()?;
+			let mut borrow = head.borrow_mut();
 
-		match self.queues[queue_index].head {
-			None => {
-				return None;
+			if let Some(ref mut nhead) = borrow.next {
+				nhead.borrow_mut().prev = None;
 			}
-			Some(ref mut head) => {
-				let mut borrow = head.borrow_mut();
 
-				match borrow.next {
-					Some(ref mut nhead) => {
-						nhead.borrow_mut().prev = None;
-					}
-					None => {}
-				}
+			let new_head = borrow.next.clone();
+			borrow.next = None;
+			borrow.prev = None;
 
-				new_head = borrow.next.clone();
-				borrow.next = None;
-				borrow.prev = None;
+			let task = head.clone();
 
-				task = head.clone();
-			}
-		}
+			(new_head, task)
+		};
 
 		self.queues[queue_index].head = new_head;
 		if self.queues[queue_index].head.is_none() {
@@ -341,7 +335,7 @@ impl PriorityTaskQueue {
 	/// Pop the next task, which has a higher or the same priority as `prio`
 	pub fn pop_with_prio(&mut self, prio: Priority) -> Option<Rc<RefCell<Task>>> {
 		if let Some(i) = msb(self.prio_bitmap) {
-			if i >= u64::from(prio.into()) {
+			if i >= prio.into().try_into().unwrap() {
 				return self.pop_from_queue(i as usize);
 			}
 		}
@@ -433,7 +427,7 @@ impl Task {
 
 		Task {
 			id: tid,
-			status: TaskStatus::TaskIdle,
+			status: TaskStatus::Idle,
 			prio: IDLE_PRIO,
 			last_stack_pointer: VirtAddr(0u64),
 			user_stack_pointer: VirtAddr(0u64),
@@ -454,7 +448,7 @@ impl Task {
 
 		Task {
 			id: tid,
-			status: TaskStatus::TaskReady,
+			status: TaskStatus::Ready,
 			prio: task.prio,
 			last_stack_pointer: VirtAddr(0u64),
 			user_stack_pointer: VirtAddr(0u64),
@@ -516,11 +510,11 @@ impl BlockedTaskQueue {
 			);
 
 			assert!(
-				borrowed.status == TaskStatus::TaskBlocked,
+				borrowed.status == TaskStatus::Blocked,
 				"Trying to wake up task {} which is not blocked",
 				borrowed.id
 			);
-			borrowed.status = TaskStatus::TaskReady;
+			borrowed.status = TaskStatus::Ready;
 			borrowed.last_wakeup_reason = reason;
 		}
 
@@ -529,7 +523,6 @@ impl BlockedTaskQueue {
 	}
 
 	/// Blocks the given task for `wakeup_time` ticks, or indefinitely if None is given.
-	#[allow(unused_assignments)]
 	pub fn add(&mut self, task: Rc<RefCell<Task>>, wakeup_time: Option<u64>) {
 		{
 			// Set the task status to Blocked.
@@ -538,18 +531,18 @@ impl BlockedTaskQueue {
 
 			assert_eq!(
 				borrowed.status,
-				TaskStatus::TaskRunning,
+				TaskStatus::Running,
 				"Trying to block task {} which is not running",
 				borrowed.id
 			);
-			borrowed.status = TaskStatus::TaskBlocked;
+			borrowed.status = TaskStatus::Blocked;
 		}
 
 		let new_node = BlockedTask::new(task, wakeup_time);
 
 		// Shall the task automatically be woken up after a certain time?
 		if let Some(wt) = wakeup_time {
-			let mut first_task = true;
+			let first_task = true;
 			let mut cursor = self.list.cursor_front_mut();
 			let mut _guard = scopeguard::guard(first_task, |first_task| {
 				// If the task is the new first task in the list, update the one-shot timer
@@ -567,16 +560,11 @@ impl BlockedTaskQueue {
 					return;
 				}
 
-				first_task = false;
 				cursor.move_next();
 			}
-
-			// No, then just insert it at the end of the list.
-			self.list.push_back(new_node);
-		} else {
-			// No, then just insert it at the end of the list.
-			self.list.push_back(new_node);
 		}
+
+		self.list.push_back(new_node);
 	}
 
 	/// Manually wake up a blocked task.
@@ -596,6 +584,9 @@ impl BlockedTaskQueue {
 				if first_task {
 					if let Some(next_node) = cursor.current() {
 						arch::set_oneshot_timer(next_node.wakeup_time);
+					} else {
+						// if no task is available, we have to disable the timer
+						arch::set_oneshot_timer(None);
 					}
 				}
 

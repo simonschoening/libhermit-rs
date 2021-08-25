@@ -73,7 +73,7 @@ impl VirtioFsDriver<'_> {
 		}
 		// 1 highprio queue, and n normal request queues
 		let vqnum = device_cfg.num_request_queues + 1;
-		let mut vqueues = Vec::<Virtq>::new();
+		let mut vqueues = Vec::<Virtq<'_>>::new();
 
 		// create the queues and tell device about them
 		for i in 0..vqnum as u16 {
@@ -294,7 +294,7 @@ pub fn create_virtiofs_driver(adapter: &pci::PciAdapter) -> Option<VirtioFsDrive
 
 	// TODO: also load the other 2 cap types (?).
 
-	// Instanciate driver on heap, so it outlives this function
+	// Instantiate driver on heap, so it outlives this function
 	let mut drv = VirtioFsDriver {
 		common_cfg,
 		device_cfg,
@@ -312,7 +312,7 @@ pub fn create_virtiofs_driver(adapter: &pci::PciAdapter) -> Option<VirtioFsDrive
 pub fn init_fs() {
 	let drv = pci::get_filesystem_driver().expect("Unable to get access to the device driver");
 
-	// Instanciate global fuse object
+	// Instantiate global fuse object
 	let fuse = fuse::Fuse::new();
 
 	// send FUSE_INIT to create session

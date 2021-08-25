@@ -10,16 +10,13 @@ extern crate alloc;
 use alloc::vec::Vec;
 use core::mem::size_of;
 
-use hermit::{print, println};
-
 //no-std otherwise std::mem::size_of
 mod common;
 
 const PATTERN: u8 = 0xAB;
 
 /// Mainly test if memcpy works as expected. Also somewhat tests memcmp
-/// Works with u8, u16, u32, u64, i16, i32 and i64
-/// u128 is blocked due to issue with num_traits, for reason see `basic_math`
+/// Works with u8, u16, u32, u64, u128, i16, i32, i64 and i128
 /// Probably not a super good test
 fn mem<T>()
 where
@@ -37,7 +34,7 @@ where
 	let mut pattern: T = t_base_pattern;
 	// Fill pattern of type T with size_of<T> times the byte pattern
 	// The "pre" and "post part of the destination vector are later filled with this pattern
-	for i in 1..size_of::<T>() {
+	for _i in 1..size_of::<T>() {
 		pattern = pattern.shl(8) + t_base_pattern;
 	}
 	let pattern = pattern; // remove mut
@@ -116,7 +113,7 @@ where
 			memcmp(
 				b.as_ptr().offset(pre_dest_vec_size as isize) as *const u8,
 				a.as_ptr() as *const u8,
-				((size_of::<T>() as usize) * vec_size as usize),
+				(size_of::<T>() as usize) * vec_size as usize,
 			),
 			0
 		);
@@ -135,10 +132,11 @@ where
 
 #[test_case]
 fn test_mem() {
+	mem::<u8>();
+	mem::<u16>();
 	mem::<u32>();
 	mem::<u64>();
-	mem::<u16>();
-	mem::<u8>();
+	mem::<u128>();
 	mem::<usize>();
 }
 

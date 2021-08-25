@@ -27,11 +27,12 @@ use crate::x86::msr::*;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use arch::x86_64::kernel::{idt, irq, percore::*, processor, BOOT_INFO};
+use core::arch::x86_64::_mm_mfence;
 #[cfg(feature = "smp")]
 use core::convert::TryInto;
+use core::hint::spin_loop;
 #[cfg(feature = "smp")]
 use core::ptr;
-use core::sync::atomic::spin_loop_hint;
 use core::{cmp, fmt, mem, u32};
 use crossbeam_utils::CachePadded;
 
@@ -155,7 +156,7 @@ impl fmt::Display for IoApicRecord {
 }
 
 #[cfg(feature = "smp")]
-extern "x86-interrupt" fn tlb_flush_handler(_stack_frame: &mut irq::ExceptionStackFrame) {
+extern "x86-interrupt" fn tlb_flush_handler(_stack_frame: irq::ExceptionStackFrame) {
 	debug!("Received TLB Flush Interrupt");
 	increment_irq_counter(TLB_FLUSH_INTERRUPT_NUMBER.into());
 	unsafe {
@@ -164,7 +165,7 @@ extern "x86-interrupt" fn tlb_flush_handler(_stack_frame: &mut irq::ExceptionSta
 	eoi();
 }
 
-extern "x86-interrupt" fn error_interrupt_handler(stack_frame: &mut irq::ExceptionStackFrame) {
+extern "x86-interrupt" fn error_interrupt_handler(stack_frame: irq::ExceptionStackFrame) {
 	error!("APIC LVT Error Interrupt");
 	error!("ESR: {:#X}", local_apic_read(IA32_X2APIC_ESR));
 	error!("{:#?}", stack_frame);
@@ -172,13 +173,13 @@ extern "x86-interrupt" fn error_interrupt_handler(stack_frame: &mut irq::Excepti
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn spurious_interrupt_handler(stack_frame: &mut irq::ExceptionStackFrame) {
+extern "x86-interrupt" fn spurious_interrupt_handler(stack_frame: irq::ExceptionStackFrame) {
 	error!("Spurious Interrupt: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
 #[cfg(feature = "smp")]
-extern "x86-interrupt" fn wakeup_handler(_stack_frame: &mut irq::ExceptionStackFrame) {
+extern "x86-interrupt" fn wakeup_handler(_stack_frame: irq::ExceptionStackFrame) {
 	debug!("Received Wakeup Interrupt");
 	increment_irq_counter(WAKEUP_INTERRUPT_NUMBER.into());
 	let core_scheduler = core_scheduler();
@@ -237,16 +238,17 @@ fn detect_from_acpi() -> Result<PhysAddr, ()> {
 
 				unsafe {
 					IOAPIC_ADDRESS = virtualmem::allocate(BasePageSize::SIZE).unwrap();
+					let record_addr = ioapic_record.address;
 					debug!(
 						"Mapping IOAPIC at {:#X} to virtual address {:#X}",
-						ioapic_record.address, IOAPIC_ADDRESS
+						record_addr, IOAPIC_ADDRESS
 					);
 
 					let mut flags = PageTableEntryFlags::empty();
 					flags.device().writable().execute_disable();
 					paging::map::<BasePageSize>(
 						IOAPIC_ADDRESS,
-						PhysAddr(ioapic_record.address.into()),
+						PhysAddr(record_addr.into()),
 						1,
 						flags,
 					);
@@ -591,9 +593,9 @@ pub fn boot_application_processors() {
 		// Set entry point
 		debug!(
 			"Set entry point for application processor to 0x{:x}",
-			_start as u64
+			_start as usize
 		);
-		*((SMP_BOOT_CODE_ADDRESS + SMP_BOOT_CODE_OFFSET_ENTRY).as_mut_ptr()) = _start as u64;
+		*((SMP_BOOT_CODE_ADDRESS + SMP_BOOT_CODE_OFFSET_ENTRY).as_mut_ptr()) = _start as usize;
 		*((SMP_BOOT_CODE_ADDRESS + SMP_BOOT_CODE_OFFSET_BOOTINFO).as_mut_ptr()) = BOOT_INFO as u64;
 	}
 
@@ -601,9 +603,8 @@ pub fn boot_application_processors() {
 	let apic_ids = unsafe { CPU_LOCAL_APIC_IDS.as_ref().unwrap() };
 	let core_id = core_id();
 
-	for core_id_to_boot in 0..apic_ids.len() {
+	for (core_id_to_boot, &apic_id) in apic_ids.iter().enumerate() {
 		if core_id_to_boot != core_id.try_into().unwrap() {
-			let apic_id = apic_ids[core_id_to_boot];
 			let destination = u64::from(apic_id) << 32;
 
 			debug!(
@@ -657,15 +658,14 @@ pub fn ipi_tlb_flush() {
 
 		// Ensure that all memory operations have completed before issuing a TLB flush.
 		unsafe {
-			llvm_asm!("mfence" ::: "memory" : "volatile");
+			_mm_mfence();
 		}
 
 		// Send an IPI with our TLB Flush interrupt number to all other CPUs.
 		irqsave(|| {
-			for core_id_to_interrupt in 0..apic_ids.len() {
+			for (core_id_to_interrupt, &apic_id) in apic_ids.iter().enumerate() {
 				if core_id_to_interrupt != core_id.try_into().unwrap() {
-					let local_apic_id = apic_ids[core_id_to_interrupt];
-					let destination = u64::from(local_apic_id) << 32;
+					let destination = u64::from(apic_id) << 32;
 					local_apic_write(
 						IA32_X2APIC_ICR,
 						destination
@@ -679,7 +679,6 @@ pub fn ipi_tlb_flush() {
 }
 
 /// Send an inter-processor interrupt to wake up a CPU Core that is in a HALT state.
-#[allow(unused_variables)]
 pub fn wakeup_core(core_id_to_wakeup: CoreId) {
 	#[cfg(feature = "smp")]
 	if core_id_to_wakeup != core_id() {
@@ -763,7 +762,7 @@ fn local_apic_write(x2apic_msr: u32, value: u64) {
 				& APIC_ICR_DELIVERY_STATUS_PENDING)
 				> 0
 			{
-				spin_loop_hint();
+				spin_loop();
 			}
 
 			// Instead of a single 64-bit ICR register, xAPIC has two 32-bit registers (ICR1 and ICR2).

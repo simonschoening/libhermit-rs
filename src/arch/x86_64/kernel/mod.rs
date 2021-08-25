@@ -43,16 +43,12 @@ pub mod scheduler;
 pub mod serial;
 #[cfg(feature = "smp")]
 mod smp_boot_code;
+#[cfg(not(test))]
+mod start;
+pub mod switch;
 pub mod systemtime;
 #[cfg(feature = "vga")]
 mod vga;
-
-#[cfg(not(test))]
-global_asm!(include_str!("start.s"));
-#[cfg(all(not(test), not(fsgsbase)))]
-global_asm!(include_str!("switch.s"));
-#[cfg(all(not(test), fsgsbase))]
-global_asm!(include_str!("switch_fsgsbase.s"));
 
 const SERIAL_PORT_BAUDRATE: u32 = 115_200;
 
@@ -90,6 +86,44 @@ pub struct BootInfo {
 	hcmask: [u8; 4],
 }
 
+impl BootInfo {
+	const LAYOUT: Self = Self {
+		magic_number: 0,
+		version: 0,
+		base: 0,
+		limit: 0,
+		image_size: 0,
+		tls_start: 0,
+		tls_filesz: 0,
+		tls_memsz: 0,
+		current_stack_address: 0,
+		current_percore_address: 0,
+		host_logical_addr: 0,
+		boot_gtod: 0,
+		mb_info: 0,
+		cmdline: 0,
+		cmdsize: 0,
+		cpu_freq: 0,
+		boot_processor: 0,
+		cpu_online: 0,
+		possible_cpus: 0,
+		current_boot_id: 0,
+		uartport: 0,
+		single_kernel: 0,
+		uhyve: 0,
+		hcip: [0; 4],
+		hcgateway: [0; 4],
+		hcmask: [0; 4],
+	};
+
+	pub const fn current_stack_address_offset() -> isize {
+		let layout = Self::LAYOUT;
+		let start = ptr::addr_of!(layout);
+		let stack = ptr::addr_of!(layout.current_stack_address);
+		unsafe { stack.cast::<u8>().offset_from(start.cast()) }
+	}
+}
+
 /// Kernel header to announce machine features
 #[cfg(not(target_os = "hermit"))]
 static mut BOOT_INFO: *mut BootInfo = ptr::null_mut();
@@ -112,63 +146,81 @@ pub fn has_ipdevice() -> bool {
 }
 
 #[cfg(not(feature = "newlib"))]
-pub fn uhyve_get_ip() -> [u8; 4] {
+#[allow(improper_ctypes_definitions)]
+extern "C" fn __sys_uhyve_get_ip() -> [u8; 4] {
 	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).hcip) }
 }
 
 #[no_mangle]
 #[cfg(not(feature = "newlib"))]
 pub fn sys_uhyve_get_ip() -> [u8; 4] {
-	kernel_function!(uhyve_get_ip())
+	kernel_function!(__sys_uhyve_get_ip())
 }
 
 #[cfg(not(feature = "newlib"))]
-pub fn uhyve_get_gateway() -> [u8; 4] {
+#[allow(improper_ctypes_definitions)]
+extern "C" fn __sys_uhyve_get_gateway() -> [u8; 4] {
 	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).hcgateway) }
 }
 
 #[no_mangle]
 #[cfg(not(feature = "newlib"))]
 pub fn sys_uhyve_get_gateway() -> [u8; 4] {
-	kernel_function!(uhyve_get_gateway())
+	kernel_function!(__sys_uhyve_get_gateway())
 }
 
 #[cfg(not(feature = "newlib"))]
-pub fn uhyve_get_mask() -> [u8; 4] {
+#[allow(improper_ctypes_definitions)]
+extern "C" fn __sys_uhyve_get_mask() -> [u8; 4] {
 	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).hcmask) }
 }
 
 #[no_mangle]
 #[cfg(not(feature = "newlib"))]
 pub fn sys_uhyve_get_mask() -> [u8; 4] {
-	kernel_function!(uhyve_get_mask())
+	kernel_function!(__sys_uhyve_get_mask())
+}
+
+#[cfg(feature = "newlib")]
+extern "C" fn __sys_uhyve_get_ip(ip: *mut u8) {
+	unsafe {
+		let data = core::ptr::read_volatile(&(*BOOT_INFO).hcip);
+		slice::from_raw_parts_mut(ip, 4).copy_from_slice(&data);
+	}
 }
 
 #[no_mangle]
 #[cfg(feature = "newlib")]
 pub unsafe extern "C" fn sys_uhyve_get_ip(ip: *mut u8) {
-	switch_to_kernel!();
-	let data = core::ptr::read_volatile(&(*BOOT_INFO).hcip);
-	slice::from_raw_parts_mut(ip, 4).copy_from_slice(&data);
-	switch_to_user!();
+	kernel_function!(__sys_uhyve_get_ip(ip))
+}
+
+#[cfg(feature = "newlib")]
+extern "C" fn __sys_uhyve_get_gateway(gw: *mut u8) {
+	unsafe {
+		let data = core::ptr::read_volatile(&(*BOOT_INFO).hcgateway);
+		slice::from_raw_parts_mut(gw, 4).copy_from_slice(&data);
+	}
 }
 
 #[no_mangle]
 #[cfg(feature = "newlib")]
 pub unsafe extern "C" fn sys_uhyve_get_gateway(gw: *mut u8) {
-	switch_to_kernel!();
-	let data = core::ptr::read_volatile(&(*BOOT_INFO).hcgateway);
-	slice::from_raw_parts_mut(gw, 4).copy_from_slice(&data);
-	switch_to_user!();
+	kernel_function!(__sys_uhyve_get_gateway(gw))
+}
+
+#[cfg(feature = "newlib")]
+extern "C" fn __sys_uhyve_get_mask(mask: *mut u8) {
+	unsafe {
+		let data = core::ptr::read_volatile(&(*BOOT_INFO).hcmask);
+		slice::from_raw_parts_mut(mask, 4).copy_from_slice(&data);
+	}
 }
 
 #[no_mangle]
 #[cfg(feature = "newlib")]
 pub unsafe extern "C" fn sys_uhyve_get_mask(mask: *mut u8) {
-	switch_to_kernel!();
-	let data = core::ptr::read_volatile(&(*BOOT_INFO).hcmask);
-	slice::from_raw_parts_mut(mask, 4).copy_from_slice(&data);
-	switch_to_user!();
+	kernel_function!(__sys_uhyve_get_mask(mask))
 }
 
 pub fn get_base_address() -> VirtAddr {

@@ -9,7 +9,7 @@ use crate::arch::x86_64::kernel::irq;
 use crate::arch::x86_64::kernel::processor;
 use crate::arch::x86_64::kernel::BOOT_INFO;
 use crate::environment;
-use core::sync::atomic::spin_loop_hint;
+use core::hint::spin_loop;
 use x86::io::*;
 
 const CMOS_COMMAND_PORT: u16 = 0x70;
@@ -56,17 +56,13 @@ impl Rtc {
 		hour & CMOS_12_HOUR_PM_FLAG > 0
 	}
 
-	/**
-	 * Returns the binary value for a given value in BCD (Binary-Coded Decimal).
-	 */
+	/// Returns the binary value for a given value in BCD (Binary-Coded Decimal).
 	const fn convert_bcd_value(value: u8) -> u8 {
 		((value / 16) * 10) + (value & 0xF)
 	}
 
-	/**
-		* Returns the number of microseconds since the epoch from a given date.
-		* Inspired by Linux Kernel's mktime64(), see kernel/time/time.c.
-		*/
+	/// Returns the number of microseconds since the epoch from a given date.
+	/// Inspired by Linux Kernel's mktime64(), see kernel/time/time.c.
 	fn microseconds_from_date(
 		year: u16,
 		month: u8,
@@ -159,7 +155,7 @@ impl Rtc {
 			while Self::read_cmos_register(CMOS_STATUS_REGISTER_A) & CMOS_UPDATE_IN_PROGRESS_FLAG
 				> 0
 			{
-				spin_loop_hint();
+				spin_loop();
 			}
 
 			// Get the current time in microseconds since the epoch.

@@ -110,6 +110,12 @@ impl Fuse {
 	}
 }
 
+impl Default for Fuse {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 struct FuseFile {
 	fuse_nid: Option<u64>,
 	fuse_fh: Option<u64>,
@@ -299,7 +305,7 @@ where
 			)
 		};
 		if let Some(extra) = &self.extra_buffer {
-			vec![rawcmd, &extra.as_ref()]
+			vec![rawcmd, extra]
 		} else {
 			vec![rawcmd]
 		}
@@ -316,7 +322,7 @@ where
 				::core::mem::size_of::<T>() + ::core::mem::size_of::<fuse_out_header>(),
 			)
 		};
-		if let Some(extra) = self.extra_buffer.as_mut() {
+		if let Some(extra) = &mut self.extra_buffer {
 			vec![rawrsp, extra]
 		} else {
 			vec![rawrsp]
@@ -648,7 +654,7 @@ fn str_into_u8buf(s: &str, u8buf: &mut [u8]) {
 // TODO: max path length?
 const MAX_PATH_LEN: usize = 256;
 fn str_to_path(s: &str) -> [u8; MAX_PATH_LEN] {
-	let mut buf = [0 as u8; MAX_PATH_LEN];
+	let mut buf = [0; MAX_PATH_LEN];
 	str_into_u8buf(s, &mut buf);
 	buf
 }

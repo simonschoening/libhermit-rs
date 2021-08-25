@@ -12,7 +12,7 @@ use log::{set_logger, set_max_level, LevelFilter, Metadata, Record};
 struct KernelLogger;
 
 impl log::Log for KernelLogger {
-	fn enabled(&self, _: &Metadata) -> bool {
+	fn enabled(&self, _: &Metadata<'_>) -> bool {
 		true
 	}
 
@@ -20,7 +20,7 @@ impl log::Log for KernelLogger {
 		// nothing to do
 	}
 
-	fn log(&self, record: &Record) {
+	fn log(&self, record: &Record<'_>) {
 		if self.enabled(record.metadata()) {
 			println!(
 				"[{}][{}] {}",
@@ -48,6 +48,7 @@ pub fn init() {
 	set_max_level(max_level);
 }
 
+#[macro_export]
 macro_rules! infoheader {
 	// This should work on paper, but it's currently not supported :(
 	// Refer to https://github.com/rust-lang/rust/issues/46569
@@ -56,19 +57,21 @@ macro_rules! infoheader {
 		info!("{:=^70}", format_args!($($arg)+));
 	});*/
 	($str:expr) => {{
-		info!("");
-		info!("{:=^70}", $str);
+		::log::info!("");
+		::log::info!("{:=^70}", $str);
 	}};
 }
 
+#[macro_export]
 macro_rules! infoentry {
-	($str:expr, $rhs:expr) => (infoentry!($str, "{}", $rhs));
-	($str:expr, $($arg:tt)+) => (info!("{:25}{}", concat!($str, ":"), format_args!($($arg)+)));
+	($str:expr, $rhs:expr) => ($crate::infoentry!($str, "{}", $rhs));
+	($str:expr, $($arg:tt)+) => (::log::info!("{:25}{}", concat!($str, ":"), format_args!($($arg)+)));
 }
 
+#[macro_export]
 macro_rules! infofooter {
 	() => {{
-		info!("{:=^70}", '=');
-		info!("");
+		::log::info!("{:=^70}", '=');
+		::log::info!("");
 	}};
 }

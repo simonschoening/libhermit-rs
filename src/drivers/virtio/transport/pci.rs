@@ -40,11 +40,11 @@ use crate::drivers::virtio::depr::virtio_fs;
 // one MUST adjust the associated From<u16>
 // implementation, in order catch all cases correctly,
 // as this function uses the catch-all "_" case!
-#[allow(dead_code, non_camel_case_types)]
+#[allow(dead_code, non_camel_case_types, clippy::upper_case_acronyms)]
 #[repr(u16)]
 pub enum DevId {
 	INVALID = 0x0,
-	VIRTIO_TRANS_DEV_ID_NET = 0x0fff,
+	VIRTIO_TRANS_DEV_ID_NET = 0x1000,
 	VIRTIO_TRANS_DEV_ID_BLK = 0x1001,
 	VIRTIO_TRANS_DEV_ID_MEM_BALL = 0x1002,
 	VIRTIO_TRANS_DEV_ID_CONS = 0x1003,
@@ -58,7 +58,7 @@ pub enum DevId {
 impl From<DevId> for u16 {
 	fn from(val: DevId) -> u16 {
 		match val {
-			DevId::VIRTIO_TRANS_DEV_ID_NET => 0x0fff,
+			DevId::VIRTIO_TRANS_DEV_ID_NET => 0x1000,
 			DevId::VIRTIO_TRANS_DEV_ID_BLK => 0x1001,
 			DevId::VIRTIO_TRANS_DEV_ID_MEM_BALL => 0x1002,
 			DevId::VIRTIO_TRANS_DEV_ID_CONS => 0x1003,
@@ -75,7 +75,7 @@ impl From<DevId> for u16 {
 impl From<u16> for DevId {
 	fn from(val: u16) -> Self {
 		match val {
-			0x0fff => DevId::VIRTIO_TRANS_DEV_ID_NET,
+			0x1000 => DevId::VIRTIO_TRANS_DEV_ID_NET,
 			0x1001 => DevId::VIRTIO_TRANS_DEV_ID_BLK,
 			0x1002 => DevId::VIRTIO_TRANS_DEV_ID_MEM_BALL,
 			0x1003 => DevId::VIRTIO_TRANS_DEV_ID_CONS,
@@ -96,7 +96,7 @@ impl From<u16> for DevId {
 // one MUST adjust the associated From<u8>
 // implementation, in order catch all cases correctly,
 // as this function uses the catch-all "_" case!
-#[allow(dead_code, non_camel_case_types)]
+#[allow(dead_code, non_camel_case_types, clippy::upper_case_acronyms)]
 #[derive(Copy, Clone, PartialEq)]
 #[repr(u8)]
 pub enum CfgType {
@@ -158,7 +158,7 @@ pub fn map_dev_cfg<T>(cap: &PciCap) -> Option<&'static mut T> {
 
 	if cap.bar_len() < u64::from(cap.len() + cap.offset()) {
 		error!(
-			"Device config of device {:x}, does not fit into memeory specified by bar!",
+			"Device config of device {:x}, does not fit into memory specified by bar!",
 			cap.dev_id(),
 		);
 		return None;
@@ -253,7 +253,7 @@ impl Eq for PciCapRaw {}
 // In order to compare two PciCapRaw structs PartialEq is needed
 impl PartialEq for PciCapRaw {
 	fn eq(&self, other: &Self) -> bool {
-		if self.cap_vndr == other.cap_vndr
+		self.cap_vndr == other.cap_vndr
 			&& self.cap_next == other.cap_next
 			&& self.cap_len == other.cap_len
 			&& self.cfg_type == other.cfg_type
@@ -261,11 +261,6 @@ impl PartialEq for PciCapRaw {
 			&& self.id == other.id
 			&& self.offset == other.offset
 			&& self.length == other.length
-		{
-			true
-		} else {
-			false
-		}
 	}
 }
 
@@ -422,12 +417,11 @@ impl<'a> VqCfgHandler<'a> {
 	pub fn set_vq_size(&mut self, size: u16) -> u16 {
 		self.raw.queue_select = self.vq_index;
 
-		if self.raw.queue_size < size {
-			self.raw.queue_size
-		} else {
+		if self.raw.queue_size >= size {
 			self.raw.queue_size = size;
-			self.raw.queue_size
 		}
+
+		self.raw.queue_size
 	}
 
 	pub fn set_ring_addr(&mut self, addr: PhysAddr) {
@@ -462,7 +456,7 @@ impl ComCfg {
 	/// returns `Some(VqCfgHandler)`.
 	///
 	/// INFO: The queue size is automatically bounded by constant `src::config:VIRTIO_MAX_QUEUE_SIZE`.
-	pub fn select_vq(&mut self, index: u16) -> Option<VqCfgHandler> {
+	pub fn select_vq(&mut self, index: u16) -> Option<VqCfgHandler<'_>> {
 		self.com_cfg.queue_select = index;
 
 		if self.com_cfg.queue_size == 0 {
@@ -486,7 +480,7 @@ impl ComCfg {
 	}
 
 	/// Sets the device status field to FAILED.
-	/// A driver MUST NOT initalize and use the device any further after this.
+	/// A driver MUST NOT initialize and use the device any further after this.
 	/// A driver MAY use the device again after a proper reset of the device.
 	pub fn set_failed(&mut self) {
 		self.com_cfg.device_status = u8::from(device::Status::FAILED);
@@ -603,7 +597,7 @@ impl ComCfgRaw {
 	/// PCI devices memory space.
 	fn map(cap: &PciCap) -> Option<&'static mut ComCfgRaw> {
 		if cap.bar.length < u64::from(cap.length + cap.offset) {
-			error!("Common config of with id {} of device {:x}, does not fit into memeory specified by bar {:x}!", 
+			error!("Common config of with id {} of device {:x}, does not fit into memory specified by bar {:x}!", 
                 cap.id,
                 cap.origin.dev_id,
                  cap.bar.index
@@ -644,7 +638,7 @@ pub struct NotifCfg {
 impl NotifCfg {
 	fn new(cap: &PciCap) -> Option<Self> {
 		if cap.bar.length < u64::from(u32::from(cap.length + cap.offset)) {
-			error!("Notification config with id {} of device {:x}, does not fit into memeory specified by bar {:x}!", 
+			error!("Notification config with id {} of device {:x}, does not fit into memory specified by bar {:x}!", 
                 cap.id,
                 cap.origin.dev_id,
                 cap.bar.index
@@ -667,10 +661,10 @@ impl NotifCfg {
 		// See Virtio specification v1.1. - 4.1.4.4
 		//
 		// Base address here already includes offset!
-		let base_addr = VirtMemAddr::from(cap.bar.mem_addr + cap.offset);
+		let base_addr = cap.bar.mem_addr + cap.offset;
 
 		Some(NotifCfg {
-			base_addr: base_addr,
+			base_addr,
 			notify_off_multiplier,
 			rank: cap.id,
 			length: cap.length,
@@ -720,7 +714,7 @@ impl NotifCtrl {
 		if self.f_notif_data {
 			unsafe {
 				let notif_area = core::slice::from_raw_parts_mut(self.notif_addr as *mut u8, 4);
-				let mut notif_data = notif_data.into_iter();
+				let mut notif_data = notif_data.iter();
 
 				for byte in notif_area {
 					*byte = *notif_data.next().unwrap();
@@ -729,7 +723,7 @@ impl NotifCtrl {
 		} else {
 			unsafe {
 				let notif_area = core::slice::from_raw_parts_mut(self.notif_addr as *mut u8, 2);
-				let mut notif_data = notif_data.into_iter();
+				let mut notif_data = notif_data.iter();
 
 				for byte in notif_area {
 					*byte = *notif_data.next().unwrap();
@@ -797,7 +791,7 @@ impl IsrStatusRaw {
 	/// device and will not be moved.
 	fn map(cap: &PciCap) -> Option<&'static mut IsrStatusRaw> {
 		if cap.bar.length < u64::from(cap.length + cap.offset) {
-			error!("ISR status config with id {} of device {:x}, does not fit into memeory specified by bar {:x}!",
+			error!("ISR status config with id {} of device {:x}, does not fit into memory specified by bar {:x}!",
                 cap.id,
                 cap.origin.dev_id,
                 cap.bar.index
@@ -886,7 +880,7 @@ pub struct ShMemCfg {
 impl ShMemCfg {
 	fn new(cap: &PciCap) -> Option<Self> {
 		if cap.bar.length < u64::from(cap.length + cap.offset) {
-			error!("Shared memory config of with id {} of device {:x}, does not fit into memeory specified by bar {:x}!", 
+			error!("Shared memory config of with id {} of device {:x}, does not fit into memory specified by bar {:x}!", 
                 cap.id,
                 cap.origin.dev_id,
                  cap.bar.index
@@ -923,7 +917,7 @@ impl ShMemCfg {
 		let virt_addr_raw = cap.bar.mem_addr + offset;
 		let raw_ptr = usize::from(virt_addr_raw) as *mut u8;
 
-		// Zero initalize shared memory area
+		// Zero initialize shared memory area
 		unsafe {
 			for i in 0..usize::from(length) {
 				*(raw_ptr.add(i)) = 0;
@@ -1009,15 +1003,12 @@ fn read_cap_raw(adapter: &PciAdapter, register: u32) -> PciCapRaw {
 	debug!("Converting read word from PCI device config space into native endian bytes.");
 
 	// Write words sequentialy into array
-	let mut index = 0;
-	for i in 0..4u32 {
+	for i in 0..4 {
 		// Read word need to be converted to little endian bytes as PCI is little endian.
 		// Intepretation of multi byte values needs to be swapped for big endian machines
 		let word: [u8; 4] = env::pci::read_config(adapter, register + 4 * i).to_le_bytes();
-		for j in 0..4 {
-			quadruple_word[index] = word[j];
-			index += 1;
-		}
+		let i = 4 * i as usize;
+		quadruple_word[i..i + 4].copy_from_slice(&word);
 	}
 
 	PciCapRaw {
@@ -1027,9 +1018,9 @@ fn read_cap_raw(adapter: &PciAdapter, register: u32) -> PciCapRaw {
 		cfg_type: quadruple_word[3],
 		bar_index: quadruple_word[4],
 		id: quadruple_word[5],
-		// Unwrapping is okay here, as transformed array slice is always 2 * u8 long and initalized
+		// Unwrapping is okay here, as transformed array slice is always 2 * u8 long and initialized
 		padding: quadruple_word[6..8].try_into().unwrap(),
-		// Unwrapping is okay here, as transformed array slice is always 4 * u8 long and initalized
+		// Unwrapping is okay here, as transformed array slice is always 4 * u8 long and initialized
 		offset: u32::from_le_bytes(quadruple_word[8..12].try_into().unwrap()),
 		length: u32::from_le_bytes(quadruple_word[12..16].try_into().unwrap()),
 	}
@@ -1081,11 +1072,8 @@ fn read_caps(adapter: &PciAdapter, bars: Vec<PciBar>) -> Result<Vec<PciCap>, Pci
 						Some(bar) => {
 							// Drivers MUST ignore BAR values different then specified in Virtio spec v1.1. - 4.1.4
 							// See Virtio specification v1.1. - 4.1.4.1
-							if bar.index <= 5 {
-								if bar.index == cap_raw.bar_index {
-									// Need to clone here as every PciCap carrys it's bar
-									break bar.clone();
-								}
+							if bar.index <= 5 && bar.index == cap_raw.bar_index {
+								break *bar;
 							}
 						}
 						None => {
@@ -1261,12 +1249,12 @@ pub fn init_device(adapter: &PciAdapter) -> Result<VirtioDriver, DriverError> {
 		}
 		DevId::VIRTIO_DEV_ID_NET => match VirtioNetDriver::init(adapter) {
 			Ok(virt_net_drv) => {
-				info!("Virtio network driver initalized with Virtio network device.");
+				info!("Virtio network driver initialized with Virtio network device.");
 				Ok(VirtioDriver::Network(virt_net_drv))
 			}
 			Err(virtio_error) => {
 				error!(
-					"Virtio networkd driver could not be initalized with device: {:x}",
+					"Virtio networkd driver could not be initialized with device: {:x}",
 					adapter.device_id
 				);
 				Err(DriverError::InitVirtioDevFail(virtio_error))

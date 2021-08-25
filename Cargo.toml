@@ -1,22 +1,28 @@
 [package]
 name = "rusty-hermit"
-version = "0.3.45"
+version = "0.3.52"
 authors = [
 	"Stefan Lankes <slankes@eonerc.rwth-aachen.de>",
-	"Colin Finck <colin.finck@rwth-aachen.de>"
+	"Colin Finck <colin.finck@rwth-aachen.de>",
 ]
-build = "build.rs"
-license = "MIT/Apache-2.0"
+license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["unikernel", "libos"]
 categories = ["os"]
 repository = "https://github.com/hermitcore/rusty-hermit"
 documentation = "https://hermitcore.github.io/libhermit-rs/hermit/"
 edition = "2018"
-description = """
-A Rust-based library operting system
-"""
-exclude = ["/img/*", "./CMakeLists.txt", "/Dockerfile", "/.gitlab-ci.yml", ".gitignore", ".gitattributes", "/.vscode/*", "/.github/*"]
+description = "A Rust-based library operting system"
+exclude = [
+	"/.github/*",
+	"/.vscode/*",
+	"/.gitlab-ci.yml",
+	"/Dockerfile",
+	"/img/*",
+	"./CMakeLists.txt",
+	".gitattributes",
+	".gitignore",
+]
 
 [lib]
 crate-type = ["staticlib", "lib"]  # "lib" required for integration tests
@@ -44,51 +50,23 @@ smp = []
 fsgsbase = []
 aarch64-qemu-stdout = []	# Doesn't do anything on x86 
 
-[dev-dependencies]
-float-cmp = "0.8.0"
-
-[target.'cfg(target_arch = "x86_64")'.dev-dependencies.x86]
-version = "0.34.*"
-default-features = false
-
-[dev-dependencies.num-traits]
-version = "0.2"
-default-features = false
-# features = ["i128"] // Blocked by: https://github.com/rust-num/num-traits/issues/177
-
 [dependencies]
-bitflags = "1.2"
-#cfg-if = "0.1"
-#byteorder = { version = "1.0", default-features = false }
-num-derive = "0.3"
+bitflags = "1.3"
 crossbeam-utils = { version = "0.8", default-features = false }
+log = { version = "0.4", default-features = false }
+num = { version = "0.4", default-features = false }
+num-derive = "0.3"
+num-traits = { version = "0.2", default-features = false }
+scopeguard = { version = "1.1", default-features = false }
 
-[dependencies.scopeguard]
-version = "1.1"
-default-features = false
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+multiboot = "0.7"
+x86 = { version = "0.41", default-features = false }
 
-[dependencies.num]
-version = "0.3"
-default-features = false
-
-[dependencies.num-traits]
-version = "0.2"
-default-features = false
-
-[dependencies.log]
-version = "0.4"
-default-features = false
-#features = ["release_max_level_info"]
-
-[target.'cfg(target_arch = "x86_64")'.dependencies.multiboot]
-version = "0.6.*"
-
-[target.'cfg(target_arch = "x86_64")'.dependencies.x86]
-version = "0.35.*"
-default-features = false
-
-[target.'cfg(target_arch = "aarch64")'.dependencies]
-qemu-exit = "1.0"
+[dev-dependencies]
+float-cmp = "0.9"
+num-traits = { version = "0.2", default-features = false }
+x86 = { version = "0.41", default-features = false }
 
 [target.'cfg(target_arch = "aarch64")'.dependencies.aarch64]
 git = "https://github.com/hermitcore/rust-aarch64"
@@ -105,6 +83,8 @@ hermit-dtb = {git = "https://github.com/hermitcore/dtb.git", branch = "master"}
 
 [target.'cfg(target_arch = "riscv64")'.dependencies.tock-registers]
 version = "0.6.0"
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+qemu-exit = "2.0"
 
 # The development profile, used for `cargo build`.
 [profile.dev]
@@ -115,16 +95,16 @@ rpath = false      # controls whether the compiler passes `-C rpath`
 lto = false         # controls `-C lto` for binaries and staticlibs
 debug-assertions = true # controls whether debug assertions are enabled
 # Disabled because of https://github.com/rust-lang/cargo/issues/7359
-#panic = "abort" # Call abort on panic https://github.com/rust-lang/rust/pull/32900
+# panic = "abort" # Call abort on panic https://github.com/rust-lang/rust/pull/32900
 
 # The release profile, used for `cargo build --release`.
 [profile.release]
-opt-level = 3
+opt-level = 2
 debug = false
 rpath = false
-lto = "thin"
+lto = false
 debug-assertions = false
-#panic = "abort"
+# panic = "abort"
 
 [patch.crates-io]
 riscv = { git = "https://github.com/simonschoening/riscv.git" }

@@ -1,0 +1,42 @@
+name: Publish Docs
+
+on:
+  push:
+    branches:
+      - master
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish_docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Rustup (apply rust-toolchain.toml)
+        run: rustup show
+      - name: Generate documentation
+        run: cargo doc
+      - name: Generate index.html
+        run: |
+          cat > target/x86_64-unknown-none-hermitkernel/doc/index.html <<EOL
+          <!doctype html>
+          <html>
+            <head>
+              <title>Redirect!</title>
+              <meta http-equiv="refresh" content="0; url=https://hermitcore.github.io/libhermit-rs/hermit/" />
+            </head>
+            <body>
+              <p><a href="https://hermitcore.github.io/libhermit-rs/hermit/">Redirect</a></p>
+            </body>
+          </html>
+          EOL
+      - name: Deploy documentation
+        if: success()
+        uses: crazy-max/ghaction-github-pages@v2
+        with:
+          target_branch: gh-pages
+          build_dir: target/x86_64-unknown-none-hermitkernel/doc
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

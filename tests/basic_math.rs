@@ -1,4 +1,5 @@
 #![feature(test)]
+#![feature(bench_black_box)]
 #![no_std]
 #![no_main]
 #![test_runner(common::test_case_runner)]
@@ -39,16 +40,18 @@ fn subtest() {
 	int_test::<u16>();
 	int_test::<u32>();
 	int_test::<u64>();
+	int_test::<u128>();
 	int_test::<i8>();
 	int_test::<i16>();
 	int_test::<i32>();
 	int_test::<i64>();
-	// int_test::<i128>();  Blocked by https://github.com/rust-num/num-traits/issues/177
+	int_test::<i128>();
 
 	sint_test::<i8>();
 	sint_test::<i16>();
 	sint_test::<i32>();
 	sint_test::<i64>();
+	sint_test::<i128>();
 }
 
 fn int_test<T>()
@@ -122,13 +125,13 @@ fn test_f64_arithmetic() {
 	let z = z * y;
 	assert!(approx_eq!(f64, z, 517877.6752108f64, ulps = 1));
 	let z = z * y;
-	assert!(approx_eq!(f64, z, 46154812.047812128f64, ulps = 2));
+	assert!(approx_eq!(f64, z, 46_154_812.047_812_13_f64, ulps = 2));
 	let z = z * y;
-	assert!(approx_eq!(f64, z, 4113455314.137160319f64, ulps = 3));
+	assert!(approx_eq!(f64, z, 4_113_455_314.137_160_3_f64, ulps = 3));
 
 	let z = black_box(z) / y;
-	assert!(approx_eq!(f64, z, 46154812.047812128f64, ulps = 2));
-	assert!(!approx_eq!(f64, z, 46154812.047812128f64, ulps = 1)); // If we haven't lost any precision, the something is fishy
+	assert!(approx_eq!(f64, z, 46_154_812.047_812_13_f64, ulps = 2));
+	assert!(!approx_eq!(f64, z, 46_154_812.047_812_13_f64, ulps = 1)); // If we haven't lost any precision, the something is fishy
 
 	let z = black_box(z) / y;
 	assert!(approx_eq!(f64, z, 517877.6752108f64, ulps = 2));

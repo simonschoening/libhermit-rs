@@ -6,12 +6,10 @@
 // http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
-#![allow(unused)]
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
-use core::fmt::Write;
 use core::{isize, ptr, slice, str};
 
 use crate::arch;
@@ -19,7 +17,7 @@ use crate::arch;
 use crate::arch::kernel::pci::get_network_driver;
 #[cfg(target_arch = "riscv64")]
 use crate::arch::kernel::mmio::get_network_driver;
-use crate::console;
+use crate::console::CONSOLE;
 use crate::environment;
 use crate::errno::*;
 use crate::syscalls::fs::{self, FilePerms, PosixFile, SeekWhence};
@@ -273,11 +271,10 @@ pub trait SyscallInterface: Send + Sync {
 
 	fn write(&self, fd: i32, buf: *const u8, len: usize) -> isize {
 		assert!(len <= isize::MAX as usize);
+		let buf = unsafe { slice::from_raw_parts(buf, len) };
 
 		if fd > 2 {
 			// Normal file
-			let buf = unsafe { slice::from_raw_parts(buf, len) };
-
 			let mut written_bytes = 0;
 			let mut fs = fs::FILESYSTEM.lock();
 			fs.fd_op(fd as u64, |file: &mut Box<dyn PosixFile + Send>| {
@@ -287,13 +284,7 @@ pub trait SyscallInterface: Send + Sync {
 			written_bytes as isize
 		} else {
 			// stdin/err/out all go to console
-			unsafe {
-				let slice = slice::from_raw_parts(buf, len);
-				console::CONSOLE
-					.lock()
-					.write_str(str::from_utf8_unchecked(slice))
-					.unwrap();
-			}
+			CONSOLE.lock().write_all(buf);
 
 			len as isize
 		}

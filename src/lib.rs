@@ -12,39 +12,30 @@
  * and Eric Kidd's toy OS (https://github.com/emk/toyos-rs).
  */
 
-#![warn(clippy::all)]
-#![allow(clippy::redundant_field_names)]
-#![allow(clippy::identity_op)]
-#![allow(clippy::needless_range_loop)]
-#![allow(clippy::tabs_in_doc_comments)]
-#![allow(clippy::toplevel_ref_arg)]
+#![warn(rust_2018_idioms)]
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
-#![allow(clippy::println_empty_string)]
-#![allow(clippy::single_match)]
-#![allow(clippy::cognitive_complexity)]
-#![allow(clippy::forget_copy)]
+#![allow(clippy::missing_safety_doc)]
 #![allow(incomplete_features)]
-#![feature(asm)]
 #![feature(abi_x86_interrupt)]
 #![feature(allocator_api)]
+#![feature(asm)]
 #![feature(const_btree_new)]
-//#![feature(const_fn)]
 #![feature(const_fn_trait_bound)]
 #![feature(const_mut_refs)]
-#![feature(global_asm)]
+#![feature(const_ptr_offset_from)]
 #![feature(lang_items)]
 #![feature(linkage)]
 #![feature(linked_list_cursors)]
-#![feature(llvm_asm)]
+#![feature(naked_functions)]
 #![feature(panic_info_message)]
 #![feature(specialization)]
-#![feature(naked_functions)]
 #![feature(nonnull_slice_from_raw_parts)]
 #![feature(core_intrinsics)]
 #![feature(alloc_error_handler)]
 #![feature(vec_into_raw_parts)]
 #![feature(drain_filter)]
-#![allow(unused_macros)]
+#![feature(llvm_asm)]
+#![feature(global_asm)]
 #![no_std]
 #![cfg_attr(target_os = "hermit", feature(custom_test_frameworks))]
 #![cfg_attr(target_os = "hermit", cfg_attr(test, test_runner(crate::test_runner)))]
@@ -59,16 +50,10 @@
 extern crate alloc;
 #[macro_use]
 extern crate bitflags;
-extern crate crossbeam_utils;
 #[macro_use]
 extern crate log;
-#[cfg(target_arch = "x86_64")]
-extern crate multiboot;
-extern crate num;
 #[macro_use]
 extern crate num_derive;
-extern crate num_traits;
-extern crate scopeguard;
 #[cfg(not(target_os = "hermit"))]
 #[macro_use]
 extern crate std;
@@ -80,7 +65,9 @@ extern crate x86;
 use alloc::alloc::Layout;
 use core::alloc::GlobalAlloc;
 #[cfg(feature = "smp")]
-use core::sync::atomic::{spin_loop_hint, AtomicU32, Ordering};
+use core::hint::spin_loop;
+#[cfg(feature = "smp")]
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use arch::percore::*;
 use mm::allocator::LockedHeap;
@@ -115,7 +102,7 @@ mod syscalls;
 mod util;
 
 #[doc(hidden)]
-pub fn _print(args: ::core::fmt::Arguments) {
+pub fn _print(args: ::core::fmt::Arguments<'_>) {
 	use core::fmt::Write;
 	crate::console::CONSOLE.lock().write_fmt(args).unwrap();
 }
@@ -157,7 +144,7 @@ static ALLOCATOR: LockedHeap = LockedHeap::empty();
 /// `size` and `align` do not meet this allocator's size or alignment constraints.
 ///
 #[cfg(target_os = "hermit")]
-pub fn __sys_malloc(size: usize, align: usize) -> *mut u8 {
+pub extern "C" fn __sys_malloc(size: usize, align: usize) -> *mut u8 {
 	let layout_res = Layout::from_size_align(size, align);
 	if layout_res.is_err() || size == 0 {
 		warn!(
@@ -199,31 +186,38 @@ pub fn __sys_malloc(size: usize, align: usize) -> *mut u8 {
 /// Returns null if the new layout does not meet the size and alignment constraints of the
 /// allocator, or if reallocation otherwise fails.
 #[cfg(target_os = "hermit")]
-pub unsafe fn __sys_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8 {
-	let layout_res = Layout::from_size_align(size, align);
-	if layout_res.is_err() || size == 0 || new_size == 0 {
-		warn!(
+pub extern "C" fn __sys_realloc(
+	ptr: *mut u8,
+	size: usize,
+	align: usize,
+	new_size: usize,
+) -> *mut u8 {
+	unsafe {
+		let layout_res = Layout::from_size_align(size, align);
+		if layout_res.is_err() || size == 0 || new_size == 0 {
+			warn!(
 			"__sys_realloc called with ptr 0x{:x}, size 0x{:x}, align 0x{:x}, new_size 0x{:x} is an invalid layout!",
 			ptr as usize, size, align, new_size
 		);
-		return core::ptr::null::<*mut u8>() as *mut u8;
-	}
-	let layout = layout_res.unwrap();
-	let new_ptr = ALLOCATOR.realloc(ptr, layout, new_size);
+			return core::ptr::null::<*mut u8>() as *mut u8;
+		}
+		let layout = layout_res.unwrap();
+		let new_ptr = ALLOCATOR.realloc(ptr, layout, new_size);
 
-	if new_ptr.is_null() {
-		debug!(
+		if new_ptr.is_null() {
+			debug!(
 			"__sys_realloc failed to resize ptr 0x{:x} with size 0x{:x}, align 0x{:x}, new_size 0x{:x} !",
 			ptr as usize, size, align, new_size
 		);
-	} else {
-		trace!(
-			"__sys_realloc: resized memory at 0x{:x}, new address 0x{:x}",
-			ptr as usize,
-			new_ptr as usize
-		);
+		} else {
+			trace!(
+				"__sys_realloc: resized memory at 0x{:x}, new address 0x{:x}",
+				ptr as usize,
+				new_ptr as usize
+			);
+		}
+		new_ptr
 	}
-	new_ptr
 }
 
 /// Interface to deallocate a memory region from the system heap
@@ -237,24 +231,26 @@ pub unsafe fn __sys_realloc(ptr: *mut u8, size: usize, align: usize, new_size: u
 /// # Errors
 /// May panic if debug assertions are enabled and invalid parameters `size` or `align` where passed.
 #[cfg(target_os = "hermit")]
-pub unsafe fn __sys_free(ptr: *mut u8, size: usize, align: usize) {
-	let layout_res = Layout::from_size_align(size, align);
-	if layout_res.is_err() || size == 0 {
-		warn!(
-			"__sys_free called with size 0x{:x}, align 0x{:x} is an invalid layout!",
-			size, align
-		);
-		debug_assert!(layout_res.is_err(), "__sys_free error: Invalid layout");
-		debug_assert_ne!(size, 0, "__sys_free error: size cannot be 0");
-	} else {
-		trace!(
-			"sys_free: deallocate memory at 0x{:x} (size 0x{:x})",
-			ptr as usize,
-			size
-		);
+pub extern "C" fn __sys_free(ptr: *mut u8, size: usize, align: usize) {
+	unsafe {
+		let layout_res = Layout::from_size_align(size, align);
+		if layout_res.is_err() || size == 0 {
+			warn!(
+				"__sys_free called with size 0x{:x}, align 0x{:x} is an invalid layout!",
+				size, align
+			);
+			debug_assert!(layout_res.is_err(), "__sys_free error: Invalid layout");
+			debug_assert_ne!(size, 0, "__sys_free error: size cannot be 0");
+		} else {
+			trace!(
+				"sys_free: deallocate memory at 0x{:x} (size 0x{:x})",
+				ptr as usize,
+				size
+			);
+		}
+		let layout = layout_res.unwrap();
+		ALLOCATOR.dealloc(ptr, layout);
 	}
-	let layout = layout_res.unwrap();
-	ALLOCATOR.dealloc(ptr, layout);
 }
 
 #[cfg(target_os = "hermit")]
@@ -310,7 +306,6 @@ extern "C" fn initd(_arg: usize) {
 	#[cfg(not(test))]
 	let (argc, argv, environ) = syscalls::get_application_parameters();
 
-	config::sanity_check();
 	// give the IP thread time to initialize the network interface
 	core_scheduler().reschedule();
 
@@ -330,7 +325,7 @@ fn synch_all_cores() {
 	CORE_COUNTER.fetch_add(1, Ordering::SeqCst);
 
 	while CORE_COUNTER.load(Ordering::SeqCst) != get_processor_count() {
-		spin_loop_hint();
+		spin_loop();
 	}
 }
 
@@ -368,7 +363,6 @@ fn boot_processor_main() -> ! {
 		arch::boot_application_processors();
 	}
 
-
 	#[cfg(feature = "smp")]
 	synch_all_cores();
 
@@ -383,10 +377,8 @@ fn boot_processor_main() -> ! {
 
 	// Start the initd task.
 	scheduler::PerCoreScheduler::spawn(initd, 0, scheduler::task::NORMAL_PRIO, 0, USER_STACK_SIZE);
-	let core_scheduler = core_scheduler();
-	
-	trace!("core_scheduler: {:p}", &core_scheduler);
 
+	let core_scheduler = core_scheduler();
 	// Run the scheduler loop.
 	core_scheduler.run();
 }
@@ -403,8 +395,6 @@ fn application_processor_main() -> ! {
 	synch_all_cores();
 
 	let core_scheduler = core_scheduler();
-
-	trace!("core_scheduler: {:p}", &core_scheduler);
 	// Run the scheduler loop.
 	core_scheduler.run();
 }

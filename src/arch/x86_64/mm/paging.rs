@@ -5,14 +5,14 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-#![allow(dead_code)]
-
+use core::convert::TryInto;
 use core::marker::PhantomData;
 use core::mem;
 use core::ptr;
 use multiboot::information::Multiboot;
 use x86::controlregs;
 use x86::irq::PageFaultError;
+use x86::tlb;
 
 #[cfg(feature = "smp")]
 use crate::arch::x86_64::kernel::apic;
@@ -26,6 +26,7 @@ use crate::mm;
 use crate::scheduler;
 
 /// Uhyve's address of the initial GDT
+#[allow(dead_code)]
 const BOOT_GDT: PhysAddr = PhysAddr(0x1000);
 
 /// Pointer to the root page table (PML4)
@@ -133,11 +134,13 @@ impl PageTableEntry {
 	}
 
 	/// Returns `true` if the page is a huge page
+	#[allow(dead_code)]
 	fn is_huge(self) -> bool {
 		(self.physical_address_and_flags & PageTableEntryFlags::HUGE_PAGE.bits()) != 0
 	}
 
 	/// Returns `true` if the page is accessible from the user space
+	#[allow(dead_code)]
 	fn is_user(self) -> bool {
 		(self.physical_address_and_flags & PageTableEntryFlags::USER_ACCESSIBLE.bits()) != 0
 	}
@@ -247,7 +250,7 @@ impl<S: PageSize> Page<S> {
 	/// Flushes this page from the TLB of this CPU.
 	fn flush_from_tlb(self) {
 		unsafe {
-			llvm_asm!("invlpg ($0)" :: "r"(self.virtual_address) : "memory" : "volatile");
+			tlb::flush(self.virtual_address.0.try_into().unwrap());
 		}
 	}
 
@@ -387,7 +390,7 @@ struct PageTable<L> {
 /// This additional trait is necessary to make use of Rust's specialization feature and provide a default
 /// implementation of some methods.
 trait PageTableMethods {
-	fn get_page_table_entry<S: PageSize>(&self, page: Page<S>) -> Option<PageTableEntry>;
+	fn get_page_table_entry<S: PageSize>(&mut self, page: Page<S>) -> Option<PageTableEntry>;
 	fn map_page_in_this_table<S: PageSize>(
 		&mut self,
 		page: Page<S>,
@@ -438,7 +441,10 @@ impl<L: PageTableLevel> PageTableMethods for PageTable<L> {
 	///
 	/// This is the default implementation called only for PT.
 	/// It is overridden by a specialized implementation for all tables with sub tables (all except PT).
-	default fn get_page_table_entry<S: PageSize>(&self, page: Page<S>) -> Option<PageTableEntry> {
+	default fn get_page_table_entry<S: PageSize>(
+		&mut self,
+		page: Page<S>,
+	) -> Option<PageTableEntry> {
 		assert_eq!(L::LEVEL, S::MAP_LEVEL);
 		let index = page.table_index::<L>();
 
@@ -472,7 +478,7 @@ where
 	///
 	/// This is the implementation for all tables with subtables (PML4, PDPT, PDT).
 	/// It overrides the default implementation above.
-	fn get_page_table_entry<S: PageSize>(&self, page: Page<S>) -> Option<PageTableEntry> {
+	fn get_page_table_entry<S: PageSize>(&mut self, page: Page<S>) -> Option<PageTableEntry> {
 		assert!(L::LEVEL >= S::MAP_LEVEL);
 		let index = page.table_index::<L>();
 
@@ -534,12 +540,12 @@ where
 	/// Returns the next subtable for the given page in the page table hierarchy.
 	///
 	/// Must only be called if a page of this size is mapped in a subtable!
-	fn subtable<S: PageSize>(&self, page: Page<S>) -> &mut PageTable<L::SubtableLevel> {
+	fn subtable<S: PageSize>(&mut self, page: Page<S>) -> &mut PageTable<L::SubtableLevel> {
 		assert!(L::LEVEL > S::MAP_LEVEL);
 
 		// Calculate the address of the subtable.
 		let index = page.table_index::<L>();
-		let table_address = self as *const PageTable<L> as usize;
+		let table_address = self as *mut PageTable<L> as usize;
 		let subtable_address = (table_address << PAGE_MAP_BITS) | (index << PAGE_BITS);
 		unsafe { &mut *(subtable_address as *mut PageTable<L::SubtableLevel>) }
 	}
@@ -574,7 +580,7 @@ where
 }
 
 pub extern "x86-interrupt" fn page_fault_handler(
-	stack_frame: &mut irq::ExceptionStackFrame,
+	stack_frame: irq::ExceptionStackFrame,
 	error_code: u64,
 ) {
 	let virtual_address = unsafe { controlregs::cr2() };

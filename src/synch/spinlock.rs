@@ -24,7 +24,7 @@ use crossbeam_utils::{Backoff, CachePadded};
 ///
 /// - By using busy waiting, it can be used outside the runtime.
 /// - It is a so called ticket lock (https://en.wikipedia.org/wiki/Ticket_lock)
-///   and completly fair.
+///   and completely fair.
 ///
 /// The interface is derived from https://mvdnes.github.io/rust-docs/spin-rs/spin/index.html.
 ///
@@ -63,7 +63,7 @@ pub struct Spinlock<T: ?Sized> {
 /// A guard to which the protected data can be accessed
 ///
 /// When the guard falls out of scope it will release the lock.
-pub struct SpinlockGuard<'a, T: ?Sized + 'a> {
+pub struct SpinlockGuard<'a, T: ?Sized> {
 	#[cfg(feature = "smp")]
 	dequeue: &'a CachePadded<AtomicUsize>,
 	data: &'a mut T,
@@ -107,7 +107,7 @@ impl<T: ?Sized> Spinlock<T> {
 	#[cfg(not(feature = "smp"))]
 	fn obtain_lock(&self) {}
 
-	pub fn lock(&self) -> SpinlockGuard<T> {
+	pub fn lock(&self) -> SpinlockGuard<'_, T> {
 		self.obtain_lock();
 		SpinlockGuard {
 			#[cfg(feature = "smp")]
@@ -161,7 +161,7 @@ impl<'a, T: ?Sized> Drop for SpinlockGuard<'a, T> {
 /// - Interrupts save lock => Interrupts will be disabled
 /// - By using busy waiting, it can be used outside the runtime.
 /// - It is a so called ticket lock (https://en.wikipedia.org/wiki/Ticket_lock)
-///   and completly fair.
+///   and completely fair.
 ///
 /// The interface is derived from https://mvdnes.github.io/rust-docs/spin-rs/spin/index.html.
 ///
@@ -200,7 +200,7 @@ pub struct SpinlockIrqSave<T: ?Sized> {
 /// A guard to which the protected data can be accessed
 ///
 /// When the guard falls out of scope it will release the lock.
-pub struct SpinlockIrqSaveGuard<'a, T: ?Sized + 'a> {
+pub struct SpinlockIrqSaveGuard<'a, T: ?Sized> {
 	#[cfg(feature = "smp")]
 	dequeue: &'a CachePadded<AtomicUsize>,
 	#[cfg(feature = "smp")]
@@ -260,7 +260,7 @@ impl<T: ?Sized> SpinlockIrqSave<T> {
 		}
 	}
 
-	pub fn lock(&self) -> SpinlockIrqSaveGuard<T> {
+	pub fn lock(&self) -> SpinlockIrqSaveGuard<'_, T> {
 		self.obtain_lock();
 		SpinlockIrqSaveGuard {
 			#[cfg(feature = "smp")]

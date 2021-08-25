@@ -8,11 +8,9 @@
 //! A module containing a virtio network driver.
 //!
 //! The module contains ...
-#![allow(unused)]
 
 #[cfg(not(feature = "newlib"))]
 use super::netwakeup;
-use crate::arch::kernel::pci::error::PciError;
 use crate::arch::kernel::pci::PciAdapter;
 use crate::arch::kernel::percore::increment_irq_counter;
 use crate::config::VIRTIO_MAX_QUEUE_SIZE;
@@ -22,27 +20,20 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
-use core::cell::RefCell;
 use core::convert::TryFrom;
 use core::mem;
-use core::ops::Deref;
 use core::result::Result;
+use core::{cell::RefCell, cmp::Ordering};
 
-use crate::drivers::virtio::env::memory::{MemLen, MemOff};
 use crate::drivers::virtio::error::VirtioError;
 use crate::drivers::virtio::transport::pci;
-use crate::drivers::virtio::transport::pci::{
-	ComCfg, IsrStatus, NotifCfg, NotifCtrl, PciCap, PciCfgAlt, ShMemCfg, UniCapsColl,
-};
+use crate::drivers::virtio::transport::pci::{ComCfg, IsrStatus, NotifCfg, PciCap, UniCapsColl};
 use crate::drivers::virtio::virtqueue::{
-	AsSliceU8, BuffSpec, BufferToken, Bytes, Transfer, TransferToken, Virtq, VqIndex, VqSize,
-	VqType,
+	AsSliceU8, BuffSpec, BufferToken, Bytes, Transfer, Virtq, VqIndex, VqSize, VqType,
 };
 
-use self::constants::{FeatureSet, Features, NetHdrFlag, NetHdrGSO, Status, MAX_NUM_VQ};
+use self::constants::{FeatureSet, Features, NetHdrGSO, Status, MAX_NUM_VQ};
 use self::error::VirtioNetError;
-use crate::arch::mm::paging::{BasePageSize, PageSize};
-use crate::arch::mm::{paging, virtualmem, VirtAddr};
 
 const ETH_HDR: usize = 14usize;
 
@@ -194,11 +185,11 @@ struct RxQueues {
 }
 
 impl RxQueues {
-	/// Takes care if handling packets correctly which need some processing after beeing received.
+	/// Takes care if handling packets correctly which need some processing after being received.
 	/// This currently include nothing. But in the future it might include among others::
 	/// * Calculating missing checksums
 	/// * Merging receive buffers, by simply checking the poll_queue (if VIRTIO_NET_F_MRG_BUF)
-	fn post_processing(mut transfer: Transfer) -> Result<Transfer, VirtioNetError> {
+	fn post_processing(transfer: Transfer) -> Result<Transfer, VirtioNetError> {
 		if transfer.poll() {
 			// Here we could implement all features.
 			Ok(transfer)
@@ -230,7 +221,7 @@ impl RxQueues {
 			// Receive Buffers must be at least 65562 bytes large with theses features set.
 			// See Virtio specification v1.1 - 5.1.6.3.1
 
-			// Currently we choose indirect descriptors if posible in order to allow
+			// Currently we choose indirect descriptors if possible in order to allow
 			// as many packages as possible inside the queue.
 			let buff_def = [
 				Bytes::new(mem::size_of::<VirtioNetHdr>()).unwrap(),
@@ -246,19 +237,12 @@ impl RxQueues {
 				BuffSpec::Single(Bytes::new(mem::size_of::<VirtioNetHdr>() + 65550).unwrap())
 			};
 
-			let num_buff: u16 = if dev_cfg
-				.features
-				.is_feature(Features::VIRTIO_F_RING_INDIRECT_DESC)
-			{
-				vq.size().into()
-			} else {
-				vq.size().into()
-			};
+			let num_buff: u16 = vq.size().into();
 
 			for _ in 0..num_buff {
 				let buff_tkn = match vq.prep_buffer(Rc::clone(vq), None, Some(spec.clone())) {
 					Ok(tkn) => tkn,
-					Err(vq_err) => {
+					Err(_vq_err) => {
 						error!("Setup of network queue failed, which should not happen!");
 						panic!("setup of network queue failed!");
 					}
@@ -288,19 +272,12 @@ impl RxQueues {
 				BuffSpec::Single(Bytes::new(mem::size_of::<VirtioNetHdr>() + 1514).unwrap())
 			};
 
-			let num_buff: u16 = if dev_cfg
-				.features
-				.is_feature(Features::VIRTIO_F_RING_INDIRECT_DESC)
-			{
-				vq.size().into()
-			} else {
-				vq.size().into()
-			};
+			let num_buff: u16 = vq.size().into();
 
 			for _ in 0..num_buff {
 				let buff_tkn = match vq.prep_buffer(Rc::clone(vq), None, Some(spec.clone())) {
 					Ok(tkn) => tkn,
-					Err(vq_err) => {
+					Err(_vq_err) => {
 						error!("Setup of network queue failed, which should not happen!");
 						panic!("setup of network queue failed!");
 					}
@@ -324,23 +301,14 @@ impl RxQueues {
 	}
 
 	fn get_next(&mut self) -> Option<Transfer> {
-		let transfer = match self.poll_queue.borrow_mut().pop_front() {
-			Some(transfer) => Some(transfer),
-			None => None,
-		};
+		let transfer = self.poll_queue.borrow_mut().pop_front();
 
-		match transfer {
-			Some(transfer) => Some(transfer),
-			None => {
-				// Check if any not yet provided transfers are in the queue.
-				self.poll();
+		transfer.or_else(|| {
+			// Check if any not yet provided transfers are in the queue.
+			self.poll();
 
-				match self.poll_queue.borrow_mut().pop_front() {
-					Some(transfer) => Some(transfer),
-					None => None,
-				}
-			}
-		}
+			self.poll_queue.borrow_mut().pop_front()
+		})
 	}
 
 	fn poll(&self) {
@@ -386,6 +354,7 @@ struct TxQueues {
 }
 
 impl TxQueues {
+	#[allow(dead_code)]
 	fn enable_notifs(&self) {
 		if self.is_multi {
 			for vq in &self.vqs {
@@ -396,6 +365,7 @@ impl TxQueues {
 		}
 	}
 
+	#[allow(dead_code)]
 	fn disable_notifs(&self) {
 		if self.is_multi {
 			for vq in &self.vqs {
@@ -457,18 +427,17 @@ impl TxQueues {
 		// Check all ready token, for correct size.
 		// Drop token if not so
 		//
-		// All Tokens inside the ready_queue are comming from the main queu with index 0.
+		// All Tokens inside the ready_queue are coming from the main queue with index 0.
 		while let Some(mut tkn) = self.ready_queue.pop() {
 			let (send_len, _) = tkn.len();
 
-			if send_len == len {
-				return Some((tkn, 0));
-			} else if send_len > len {
-				tkn.restr_size(Some(len), None).unwrap();
-				return Some((tkn, 0));
-			} else {
-				// Otherwise we are freeing the queue from the token.
-				drop(tkn);
+			match send_len.cmp(&len) {
+				Ordering::Less => {}
+				Ordering::Equal => return Some((tkn, 0)),
+				Ordering::Greater => {
+					tkn.restr_size(Some(len), None).unwrap();
+					return Some((tkn, 0));
+				}
 			}
 		}
 
@@ -480,14 +449,13 @@ impl TxQueues {
 			let mut tkn = transfer.reuse().unwrap();
 			let (send_len, _) = tkn.len();
 
-			if send_len == len {
-				return Some((tkn, 0));
-			} else if send_len > len {
-				tkn.restr_size(Some(len), None).unwrap();
-				return Some((tkn, 0));
-			} else {
-				// Otherwise we are freeing the queue from the token.
-				drop(tkn);
+			match send_len.cmp(&len) {
+				Ordering::Less => {}
+				Ordering::Equal => return Some((tkn, 0)),
+				Ordering::Greater => {
+					tkn.restr_size(Some(len), None).unwrap();
+					return Some((tkn, 0));
+				}
 			}
 		}
 
@@ -495,10 +463,10 @@ impl TxQueues {
 		let spec = BuffSpec::Single(Bytes::new(len).unwrap());
 
 		match self.vqs[0].prep_buffer(Rc::clone(&self.vqs[0]), Some(spec), None) {
-			Ok(tkn) => return Some((tkn, 0)),
+			Ok(tkn) => Some((tkn, 0)),
 			Err(_) => {
-				// Here it is possible if multiple ques are enabled to get another buffertoken from them!
-				// Info the queues are disbaled upon initalization and should be enabled somehow!
+				// Here it is possible if multiple queues are enabled to get another buffertoken from them!
+				// Info the queues are disabled upon initialization and should be enabled somehow!
 				None
 			}
 		}
@@ -558,7 +526,7 @@ impl NetworkInterface for VirtioNetDriver {
 		let len = len + core::mem::size_of::<VirtioNetHdr>();
 
 		match self.send_vqs.get_tkn(len) {
-			Some((mut buff_tkn, vq_index)) => {
+			Some((mut buff_tkn, _vq_index)) => {
 				let (send_ptrs, _) = buff_tkn.raw_ptrs();
 				// Currently we have single Buffers in the TxQueue of size: MTU + ETH_HDR + VIRTIO_NET_HDR
 				// see TxQueue.add()
@@ -575,7 +543,7 @@ impl NetworkInterface for VirtioNetDriver {
 		}
 	}
 
-	fn send_tx_buffer(&mut self, tkn_handle: usize, len: usize) -> Result<(), ()> {
+	fn send_tx_buffer(&mut self, tkn_handle: usize, _len: usize) -> Result<(), ()> {
 		// This does not result in a new assignment, or in a drop of the BufferToken, which
 		// would be dangerous, as the memory is freed then.
 		let tkn = *unsafe { Box::from_raw(tkn_handle as *mut BufferToken) };
@@ -593,8 +561,8 @@ impl NetworkInterface for VirtioNetDriver {
 
 	fn receive_rx_buffer(&mut self) -> Result<(&'static [u8], usize), ()> {
 		match self.recv_vqs.get_next() {
-			Some(mut transfer) => {
-				let mut transfer = match RxQueues::post_processing(transfer) {
+			Some(transfer) => {
+				let transfer = match RxQueues::post_processing(transfer) {
 					Ok(trf) => trf,
 					Err(vnet_err) => {
 						error!("Post processing failed. Err: {:?}", vnet_err);
@@ -608,8 +576,8 @@ impl NetworkInterface for VirtioNetDriver {
 				// If the given length is zero, we currently fail.
 				if recv_data.len() == 2 {
 					let recv_payload = recv_data.pop().unwrap();
-					// Create static refrence for the user-space
-					// As long as we keep the Transfer in a raw refernce this refernce is static,
+					// Create static reference for the user-space
+					// As long as we keep the Transfer in a raw reference this reference is static,
 					// so this is fine.
 					let recv_ref = (recv_payload as *const [u8]) as *mut [u8];
 					let ref_data: &'static [u8] = unsafe { &*(recv_ref) };
@@ -680,8 +648,7 @@ impl NetworkInterface for VirtioNetDriver {
 			true
 		} else if self.isr_stat.is_cfg_change() {
 			info!("Configuration changes are not possible! Aborting");
-			todo!("Implement possibiity to change config on the fly...");
-			false
+			todo!("Implement possibiity to change config on the fly...")
 		} else {
 			false
 		}
@@ -719,6 +686,7 @@ impl VirtioNetDriver {
 		}
 	}
 
+	#[allow(dead_code)]
 	fn is_announce(&self) -> bool {
 		if self
 			.dev_cfg
@@ -737,6 +705,7 @@ impl VirtioNetDriver {
 	/// device and overrides the num_vq field in the common config.
 	///
 	/// Returns 1 (i.e. minimum number of pairs) if VIRTIO_NET_F_MQ is not set.
+	#[allow(dead_code)]
 	fn get_max_vq_pairs(&self) -> u16 {
 		if self.dev_cfg.features.is_feature(Features::VIRTIO_NET_F_MQ) {
 			self.dev_cfg.raw.max_virtqueue_pairs
@@ -763,7 +732,7 @@ impl VirtioNetDriver {
 	fn map_cfg(cap: &PciCap) -> Option<NetDevCfg> {
 		/*
 		if cap.bar_len() <  u64::from(cap.len() + cap.offset()) {
-			error!("Network config of device {:x}, does not fit into memeory specified by bar!",
+			error!("Network config of device {:x}, does not fit into memory specified by bar!",
 				cap.dev_id(),
 			);
 			return None
@@ -800,42 +769,37 @@ impl VirtioNetDriver {
 		mut caps_coll: UniCapsColl,
 		adapter: &PciAdapter,
 	) -> Result<Self, error::VirtioNetError> {
-		let com_cfg = loop {
-			match caps_coll.get_com_cfg() {
-				Some(com_cfg) => break com_cfg,
-				None => {
-					error!("No common config. Aborting!");
-					return Err(error::VirtioNetError::NoComCfg(adapter.device_id));
-				}
+		let com_cfg = match caps_coll.get_com_cfg() {
+			Some(com_cfg) => com_cfg,
+			None => {
+				error!("No common config. Aborting!");
+				return Err(error::VirtioNetError::NoComCfg(adapter.device_id));
 			}
 		};
 
-		let isr_stat = loop {
-			match caps_coll.get_isr_cfg() {
-				Some(isr_stat) => break isr_stat,
-				None => {
-					error!("No ISR status config. Aborting!");
-					return Err(error::VirtioNetError::NoIsrCfg(adapter.device_id));
-				}
+		let isr_stat = match caps_coll.get_isr_cfg() {
+			Some(isr_stat) => isr_stat,
+			None => {
+				error!("No ISR status config. Aborting!");
+				return Err(error::VirtioNetError::NoIsrCfg(adapter.device_id));
 			}
 		};
 
-		let notif_cfg = loop {
-			match caps_coll.get_notif_cfg() {
-				Some(notif_cfg) => break notif_cfg,
-				None => {
-					error!("No notif config. Aborting!");
-					return Err(error::VirtioNetError::NoNotifCfg(adapter.device_id));
-				}
+		let notif_cfg = match caps_coll.get_notif_cfg() {
+			Some(notif_cfg) => notif_cfg,
+			None => {
+				error!("No notif config. Aborting!");
+				return Err(error::VirtioNetError::NoNotifCfg(adapter.device_id));
 			}
 		};
 
 		let dev_cfg = loop {
 			match caps_coll.get_dev_cfg() {
-				Some(cfg) => match VirtioNetDriver::map_cfg(&cfg) {
-					Some(dev_cfg) => break dev_cfg,
-					None => (),
-				},
+				Some(cfg) => {
+					if let Some(dev_cfg) = VirtioNetDriver::map_cfg(&cfg) {
+						break dev_cfg;
+					}
+				}
 				None => {
 					error!("No dev config. Aborting!");
 					return Err(error::VirtioNetError::NoDevCfg(adapter.device_id));
@@ -866,7 +830,7 @@ impl VirtioNetDriver {
 		})
 	}
 
-	/// Initallizes the device in adherence to specificaton. Returns Some(VirtioNetError)
+	/// Initiallizes the device in adherence to specificaton. Returns Some(VirtioNetError)
 	/// upon failure and None in case everything worked as expected.
 	///
 	/// See Virtio specification v1.1. - 3.1.1.
@@ -890,7 +854,7 @@ impl VirtioNetDriver {
 
 		let mut min_feat_set = FeatureSet::new(0);
 		min_feat_set.set_features(&min_feats);
-		let mut feats: Vec<Features> = Vec::from(min_feats);
+		let mut feats: Vec<Features> = min_feats;
 
 		// If wanted, push new features into feats here:
 		//
@@ -928,7 +892,7 @@ impl VirtioNetDriver {
 							error!("Device features set, does not satisfy minimal features needed. Aborting!");
 							return Err(VirtioNetError::FailFeatureNeg(self.dev_cfg.dev_id));
 						} else {
-							feats = match Features::into_features(dev_feats & drv_feats) {
+							feats = match Features::from_set(dev_feats & drv_feats) {
 								Some(feats) => feats,
 								None => {
 									error!("Feature negotiation failed with minimal feature set. Aborting!");
@@ -984,7 +948,7 @@ impl VirtioNetDriver {
 
 		match self.dev_spec_init() {
 			Ok(_) => info!(
-				"Device specific initalization for Virtio network defice {:x} finished",
+				"Device specific initialization for Virtio network defice {:x} finished",
 				self.dev_cfg.dev_id
 			),
 			Err(vnet_err) => return Err(vnet_err),
@@ -997,7 +961,7 @@ impl VirtioNetDriver {
 
 	/// Negotiates a subset of features, understood and wanted by both the OS
 	/// and the device.
-	fn negotiate_features(&mut self, wanted_feats: &Vec<Features>) -> Result<(), VirtioNetError> {
+	fn negotiate_features(&mut self, wanted_feats: &[Features]) -> Result<(), VirtioNetError> {
 		let mut drv_feats = FeatureSet::new(0);
 
 		for feat in wanted_feats.iter() {
@@ -1008,7 +972,7 @@ impl VirtioNetDriver {
 
 		// Checks if the selected feature set is compatible with requirements for
 		// features according to Virtio spec. v1.1 - 5.1.3.1.
-		match FeatureSet::check_features(&wanted_feats) {
+		match FeatureSet::check_features(wanted_feats) {
 			Ok(_) => {
 				info!("Feature set wanted by network driver are in conformance with specification.")
 			}
@@ -1024,10 +988,10 @@ impl VirtioNetDriver {
 		}
 	}
 
-	/// Device Specfic initalization according to Virtio specifictation v1.1. - 5.1.5
+	/// Device Specfic initialization according to Virtio specifictation v1.1. - 5.1.5
 	fn dev_spec_init(&mut self) -> Result<(), VirtioNetError> {
 		match self.virtqueue_init() {
-			Ok(_) => info!("Network driver successfully initalized virtqueues."),
+			Ok(_) => info!("Network driver successfully initialized virtqueues."),
 			Err(vnet_err) => return Err(vnet_err),
 		}
 
@@ -1050,8 +1014,6 @@ impl VirtioNetDriver {
 					VqIndex::from(self.num_vqs),
 					self.dev_cfg.features.into(),
 				))));
-
-				self.ctrl_vq.0.as_ref().unwrap().enable_notifs();
 			} else {
 				self.ctrl_vq = CtrlQueue(Some(Rc::new(Virtq::new(
 					&mut self.com_cfg,
@@ -1061,9 +1023,9 @@ impl VirtioNetDriver {
 					VqIndex::from(self.num_vqs),
 					self.dev_cfg.features.into(),
 				))));
-
-				self.ctrl_vq.0.as_ref().unwrap().enable_notifs();
 			}
+
+			self.ctrl_vq.0.as_ref().unwrap().enable_notifs();
 		}
 
 		// If device does not take care of MAC address, the driver has to create one
@@ -1074,7 +1036,7 @@ impl VirtioNetDriver {
 		Ok(())
 	}
 
-	/// Initalize virtqueues via the queue interface and populates receiving queues
+	/// Initialize virtqueues via the queue interface and populates receiving queues
 	fn virtqueue_init(&mut self) -> Result<(), VirtioNetError> {
 		// We are assuming here, that the device single source of truth is the
 		// device specific configuration. Hence we do NOT check if
@@ -1196,7 +1158,7 @@ impl VirtioNetDriver {
 
 		match drv.init_dev() {
 			Ok(_) => info!(
-				"Network device with id {:x}, has been initalized by driver!",
+				"Network device with id {:x}, has been initialized by driver!",
 				drv.dev_cfg.dev_id
 			),
 			Err(vnet_err) => {
@@ -1206,9 +1168,9 @@ impl VirtioNetDriver {
 		}
 
 		if drv.is_link_up() {
-			info!("Virtio-net link is up after initalization.")
+			info!("Virtio-net link is up after initialization.")
 		} else {
-			info!("Virtio-net link is down after initalization!")
+			info!("Virtio-net link is down after initialization!")
 		}
 
 		Ok(drv)
@@ -1218,7 +1180,6 @@ impl VirtioNetDriver {
 mod constants {
 	use super::error::VirtioNetError;
 	use alloc::vec::Vec;
-	use core::fmt::Display;
 	use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
 	// Configuration constants
@@ -1519,7 +1480,7 @@ mod constants {
 	}
 
 	impl core::fmt::Display for Features {
-		fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+		fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
 			match *self {
 				Features::VIRTIO_NET_F_CSUM => write!(f, "VIRTIO_NET_F_CSUM"),
 				Features::VIRTIO_NET_F_GUEST_CSUM => write!(f, "VIRTIO_NET_F_GUEST_CSUM"),
@@ -1566,7 +1527,7 @@ mod constants {
 		/// INFO: In case the FEATURES enum is changed, this function MUST also be adjusted to the new set!
 		//
 		// Really UGLY function, but currently the most convenienvt one to reduce the set of features for the driver easily!
-		pub fn into_features(feat_set: FeatureSet) -> Option<Vec<Features>> {
+		pub fn from_set(feat_set: FeatureSet) -> Option<Vec<Features>> {
 			let mut vec_of_feats: Vec<Features> = Vec::new();
 			let feats = feat_set.0;
 
@@ -1772,7 +1733,7 @@ mod constants {
 		/// wraps the u64 indicating the feature set.
 		///
 		/// INFO: Iterates twice over the vector of features.
-		pub fn check_features(feats: &Vec<Features>) -> Result<(), VirtioNetError> {
+		pub fn check_features(feats: &[Features]) -> Result<(), VirtioNetError> {
 			let mut feat_bits = 0u64;
 
 			for feat in feats.iter() {
@@ -1921,16 +1882,15 @@ mod constants {
 
 		/// Sets features contained in feats to true.
 		///
-		/// WARN: Features should be checked before using this function via the
-		/// `FeatureSet::check_features(feats: Vec<Features>) -> Result<(), VirtioNetError>` function.
-		pub fn set_features(&mut self, feats: &Vec<Features>) {
+		/// WARN: Features should be checked before using this function via the [`check_features`] function.
+		pub fn set_features(&mut self, feats: &[Features]) {
 			for feat in feats {
 				self.0 |= *feat;
 			}
 		}
 
 		/// Returns a new instance of (FeatureSet)[FeatureSet] with all features
-		/// initalized to false.
+		/// initialized to false.
 		pub fn new(val: u64) -> Self {
 			FeatureSet(val)
 		}

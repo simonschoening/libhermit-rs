@@ -8,25 +8,22 @@
 //! This module contains Virtio's split virtqueue.
 //! See Virito specification v1.1. - 2.6
 #![allow(dead_code)]
-#![allow(unused)]
 
-use super::super::features::Features;
-use super::super::transport::pci::{ComCfg, IsrStatus, NotifCfg, NotifCtrl};
+use super::super::transport::pci::{ComCfg, NotifCfg, NotifCtrl};
 use super::error::VirtqError;
 use super::{
-	AsSliceU8, BuffSpec, Buffer, BufferToken, Bytes, DescrFlags, MemDescr, MemDescrId, MemPool,
-	Pinned, Transfer, TransferState, TransferToken, Virtq, VqIndex, VqSize,
+	AsSliceU8, BuffSpec, Buffer, BufferToken, Bytes, DescrFlags, MemDescr, MemPool, Pinned,
+	Transfer, TransferState, TransferToken, Virtq, VqIndex, VqSize,
 };
 use crate::arch::mm::paging::{BasePageSize, PageSize};
-use crate::arch::mm::{paging, virtualmem, PhysAddr, VirtAddr};
+use crate::arch::mm::{paging, VirtAddr};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
-use core::cell::RefCell;
 use core::convert::TryFrom;
-use core::ops::Deref;
 use core::sync::atomic::{fence, Ordering};
+use core::{cell::RefCell, ptr};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -101,7 +98,7 @@ impl DescrRing {
 
 		if let Some(buff) = pin.buff_tkn.as_ref().unwrap().recv_buff.as_ref() {
 			if buff.is_indirect() {
-				if desc_lst.len() == 0 {
+				if desc_lst.is_empty() {
 					desc_lst.push((buff.get_ctrl_desc().unwrap(), true));
 					is_indirect = true;
 				} else if desc_lst.len() == 1 {
@@ -150,45 +147,41 @@ impl DescrRing {
 						0,
 					)
 				}
-			} else {
-				if len > 1 {
-					let next_index = {
-						let (desc, _) = desc_lst[desc_cnt + 1];
-						desc.id.as_ref().unwrap().0 - 1
-					};
+			} else if len > 1 {
+				let next_index = {
+					let (desc, _) = desc_lst[desc_cnt + 1];
+					desc.id.as_ref().unwrap().0 - 1
+				};
 
-					if is_write {
-						Descriptor::new(
-							paging::virt_to_phys(VirtAddr::from(desc.ptr as u64)).into(),
-							desc.len as u32,
-							DescrFlags::VIRTQ_DESC_F_WRITE | DescrFlags::VIRTQ_DESC_F_NEXT,
-							next_index,
-						)
-					} else {
-						Descriptor::new(
-							paging::virt_to_phys(VirtAddr::from(desc.ptr as u64)).into(),
-							desc.len as u32,
-							DescrFlags::VIRTQ_DESC_F_NEXT.into(),
-							next_index,
-						)
-					}
+				if is_write {
+					Descriptor::new(
+						paging::virt_to_phys(VirtAddr::from(desc.ptr as u64)).into(),
+						desc.len as u32,
+						DescrFlags::VIRTQ_DESC_F_WRITE | DescrFlags::VIRTQ_DESC_F_NEXT,
+						next_index,
+					)
 				} else {
-					if is_write {
-						Descriptor::new(
-							paging::virt_to_phys(VirtAddr::from(desc.ptr as u64)).into(),
-							desc.len as u32,
-							DescrFlags::VIRTQ_DESC_F_WRITE.into(),
-							0,
-						)
-					} else {
-						Descriptor::new(
-							paging::virt_to_phys(VirtAddr::from(desc.ptr as u64)).into(),
-							desc.len as u32,
-							0,
-							0,
-						)
-					}
+					Descriptor::new(
+						paging::virt_to_phys(VirtAddr::from(desc.ptr as u64)).into(),
+						desc.len as u32,
+						DescrFlags::VIRTQ_DESC_F_NEXT.into(),
+						next_index,
+					)
 				}
+			} else if is_write {
+				Descriptor::new(
+					paging::virt_to_phys(VirtAddr::from(desc.ptr as u64)).into(),
+					desc.len as u32,
+					DescrFlags::VIRTQ_DESC_F_WRITE.into(),
+					0,
+				)
+			} else {
+				Descriptor::new(
+					paging::virt_to_phys(VirtAddr::from(desc.ptr as u64)).into(),
+					desc.len as u32,
+					0,
+					0,
+				)
 			};
 
 			self.descr_table.raw[write_indx] = descriptor;
@@ -218,7 +211,8 @@ impl DescrRing {
 				tkn.buff_tkn
 					.as_mut()
 					.unwrap()
-					.restr_size(None, Some(used_elem.len as usize));
+					.restr_size(None, Some(used_elem.len as usize))
+					.unwrap();
 			}
 			match tkn.await_queue {
 				Some(_) => {
@@ -294,7 +288,7 @@ impl SplitVq {
 	/// The `notif` parameter indicates if the driver wants to have a notification for this specific
 	/// transfer. This is only for performance optimization. As it is NOT ensured, that the device sees the
 	/// updated notification flags before finishing transfers!
-	pub fn dispatch_batch(&self, tkns: Vec<TransferToken>, notif: bool) -> Vec<Transfer> {
+	pub fn dispatch_batch(&self, _tkns: Vec<TransferToken>, _notif: bool) -> Vec<Transfer> {
 		unimplemented!();
 	}
 
@@ -312,9 +306,9 @@ impl SplitVq {
 	/// Tokens to get a reference to the provided await_queue, where they will be placed upon finish.
 	pub fn dispatch_batch_await(
 		&self,
-		tkns: Vec<TransferToken>,
-		await_queue: Rc<RefCell<VecDeque<Transfer>>>,
-		notif: bool,
+		_tkns: Vec<TransferToken>,
+		_await_queue: Rc<RefCell<VecDeque<Transfer>>>,
+		_notif: bool,
 	) {
 		unimplemented!()
 	}
@@ -338,7 +332,7 @@ impl SplitVq {
 			let mut index = index.iter();
 			// Even on 64bit systems this is fine, as we have a queue_size < 2^15!
 			let det_notif_data: u16 = (next_off as u16) >> 1;
-			let flags = (det_notif_data | (u16::from(next_wrap) << 15)).to_le_bytes();
+			let flags = (det_notif_data | (next_wrap << 15)).to_le_bytes();
 			let mut flags = flags.iter();
 			let mut notif_data: [u8; 4] = [0, 0, 0, 0];
 
@@ -387,7 +381,7 @@ impl SplitVq {
 		notif_cfg: &NotifCfg,
 		size: VqSize,
 		index: VqIndex,
-		feats: u64,
+		_feats: u64,
 	) -> Result<Self, ()> {
 		// Get a handler to the queues configuration area.
 		let mut vq_handler = match com_cfg.select_vq(index.into()) {
@@ -427,9 +421,9 @@ impl SplitVq {
 		};
 
 		unsafe {
-			let index = avail_raw.offset(2) as usize - avail_raw as usize;
-			let ring = avail_raw.offset(4) as usize - avail_raw as usize;
-			let event = avail_raw.offset(4 + 2 * (size as isize)) as usize - avail_raw as usize;
+			let _index = avail_raw.offset(2) as usize - avail_raw as usize;
+			let _ring = avail_raw.offset(4) as usize - avail_raw as usize;
+			let _event = avail_raw.offset(4 + 2 * (size as isize)) as usize - avail_raw as usize;
 		}
 
 		let used_ring = unsafe {
@@ -445,9 +439,9 @@ impl SplitVq {
 		};
 
 		unsafe {
-			let index = used_raw.offset(2) as usize - used_raw as usize;
-			let ring = used_raw.offset(4) as usize - used_raw as usize;
-			let event = used_raw.offset(4 + 8 * (size as isize)) as usize - used_raw as usize;
+			let _index = used_raw.offset(2) as usize - used_raw as usize;
+			let _ring = used_raw.offset(4) as usize - used_raw as usize;
+			let _event = used_raw.offset(4 + 8 * (size as isize)) as usize - used_raw as usize;
 		}
 
 		// Provide memory areas of the queues data structures to the device
@@ -458,7 +452,7 @@ impl SplitVq {
 
 		let descr_ring = DescrRing {
 			read_idx: 0,
-			ref_ring: vec![0 as *mut TransferToken; size as usize].into_boxed_slice(),
+			ref_ring: vec![ptr::null_mut(); size as usize].into_boxed_slice(),
 			descr_table,
 			avail_ring,
 			used_ring,
@@ -470,10 +464,10 @@ impl SplitVq {
 				+ usize::try_from(notif_cfg.multiplier()).unwrap()) as *mut usize,
 		);
 
-		// Initalize new memory pool.
+		// Initialize new memory pool.
 		let mem_pool = Rc::new(MemPool::new(size));
 
-		// Initalize an empty vector for future dropped transfers
+		// Initialize an empty vector for future dropped transfers
 		let dropped: RefCell<Vec<Pinned<TransferToken>>> = RefCell::new(Vec::new());
 
 		vq_handler.enable_queue();
@@ -494,11 +488,11 @@ impl SplitVq {
 	pub fn prep_transfer_from_raw<T: AsSliceU8 + 'static, K: AsSliceU8 + 'static>(
 		&self,
 		master: Rc<Virtq>,
-		send: Option<(*mut T, BuffSpec)>,
-		recv: Option<(*mut K, BuffSpec)>,
+		send: Option<(*mut T, BuffSpec<'_>)>,
+		recv: Option<(*mut K, BuffSpec<'_>)>,
 	) -> Result<TransferToken, VirtqError> {
 		match (send, recv) {
-			(None, None) => return Err(VirtqError::BufferNotSpecified),
+			(None, None) => Err(VirtqError::BufferNotSpecified),
 			(Some((send_data, send_spec)), None) => {
 				match send_spec {
 					BuffSpec::Single(size) => {
@@ -555,7 +549,7 @@ impl SplitVq {
 							};
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						Ok(TransferToken {
@@ -593,7 +587,7 @@ impl SplitVq {
 							);
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						let ctrl_desc = match self.create_indirect_ctrl(Some(&desc_lst), None) {
@@ -606,7 +600,7 @@ impl SplitVq {
 							buff_tkn: Some(BufferToken {
 								send_buff: Some(Buffer::Indirect {
 									desc_lst: desc_lst.into_boxed_slice(),
-									ctrl_desc: ctrl_desc,
+									ctrl_desc,
 									len: data_slice.len(),
 									next_write: 0,
 								}),
@@ -677,7 +671,7 @@ impl SplitVq {
 							};
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						Ok(TransferToken {
@@ -715,7 +709,7 @@ impl SplitVq {
 							);
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						let ctrl_desc = match self.create_indirect_ctrl(None, Some(&desc_lst)) {
@@ -729,7 +723,7 @@ impl SplitVq {
 								send_buff: None,
 								recv_buff: Some(Buffer::Indirect {
 									desc_lst: desc_lst.into_boxed_slice(),
-									ctrl_desc: ctrl_desc,
+									ctrl_desc,
 									len: data_slice.len(),
 									next_write: 0,
 								}),
@@ -836,7 +830,7 @@ impl SplitVq {
 							};
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						Ok(TransferToken {
@@ -884,7 +878,7 @@ impl SplitVq {
 							};
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						let recv_data_slice = unsafe { (*recv_data).as_slice_u8() };
@@ -910,7 +904,7 @@ impl SplitVq {
 							};
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						Ok(TransferToken {
@@ -958,7 +952,7 @@ impl SplitVq {
 							};
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						let recv_data_slice = unsafe { (*recv_data).as_slice_u8() };
@@ -988,15 +982,8 @@ impl SplitVq {
 									desc_lst: vec![recv_desc].into_boxed_slice(),
 									len: recv_data_slice.len(),
 									next_write: 0,
-								}),
-								vq: master,
-								ret_send: false,
-								ret_recv: false,
-								reusable: false,
-							}),
-							await_queue: None,
-						})
-					}
+								}),#[cfg(not(feature = "pci"))]
+								let check_scheduler = false;
 					(BuffSpec::Indirect(send_size_lst), BuffSpec::Indirect(recv_size_lst)) => {
 						let send_data_slice = unsafe { (*send_data).as_slice_u8() };
 						let mut send_desc_lst: Vec<MemDescr> =
@@ -1018,7 +1005,7 @@ impl SplitVq {
 							);
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						let recv_data_slice = unsafe { (*recv_data).as_slice_u8() };
@@ -1041,7 +1028,7 @@ impl SplitVq {
 							);
 
 							// update the starting index for the next iteration
-							index = index + usize::from(*byte);
+							index += usize::from(*byte);
 						}
 
 						let ctrl_desc = match self
@@ -1062,7 +1049,7 @@ impl SplitVq {
 								}),
 								send_buff: Some(Buffer::Indirect {
 									desc_lst: send_desc_lst.into_boxed_slice(),
-									ctrl_desc: ctrl_desc,
+									ctrl_desc,
 									len: send_data_slice.len(),
 									next_write: 0,
 								}),
@@ -1075,13 +1062,9 @@ impl SplitVq {
 						})
 					}
 					(BuffSpec::Indirect(_), BuffSpec::Single(_))
-					| (BuffSpec::Indirect(_), BuffSpec::Multiple(_)) => {
-						return Err(VirtqError::BufferInWithDirect)
-					}
+					| (BuffSpec::Indirect(_), BuffSpec::Multiple(_)) => Err(VirtqError::BufferInWithDirect),
 					(BuffSpec::Single(_), BuffSpec::Indirect(_))
-					| (BuffSpec::Multiple(_), BuffSpec::Indirect(_)) => {
-						return Err(VirtqError::BufferInWithDirect)
-					}
+					| (BuffSpec::Multiple(_), BuffSpec::Indirect(_)) => Err(VirtqError::BufferInWithDirect),
 				}
 			}
 		}
@@ -1091,12 +1074,12 @@ impl SplitVq {
 	pub fn prep_buffer(
 		&self,
 		master: Rc<Virtq>,
-		send: Option<BuffSpec>,
-		recv: Option<BuffSpec>,
+		send: Option<BuffSpec<'_>>,
+		recv: Option<BuffSpec<'_>>,
 	) -> Result<BufferToken, VirtqError> {
 		match (send, recv) {
 			// No buffers specified
-			(None, None) => return Err(VirtqError::BufferNotSpecified),
+			(None, None) => Err(VirtqError::BufferNotSpecified),
 			// Send buffer specified, No recv buffer
 			(Some(spec), None) => {
 				match spec {
@@ -1118,7 +1101,7 @@ impl SplitVq {
 									reusable: true,
 								})
 							}
-							Err(vq_err) => return Err(vq_err),
+							Err(vq_err) => Err(vq_err),
 						}
 					}
 					BuffSpec::Multiple(size_lst) => {
@@ -1206,7 +1189,7 @@ impl SplitVq {
 									reusable: true,
 								})
 							}
-							Err(vq_err) => return Err(vq_err),
+							Err(vq_err) => Err(vq_err),
 						}
 					}
 					BuffSpec::Multiple(size_lst) => {
@@ -1486,13 +1469,9 @@ impl SplitVq {
 						})
 					}
 					(BuffSpec::Indirect(_), BuffSpec::Single(_))
-					| (BuffSpec::Indirect(_), BuffSpec::Multiple(_)) => {
-						return Err(VirtqError::BufferInWithDirect)
-					}
+					| (BuffSpec::Indirect(_), BuffSpec::Multiple(_)) => Err(VirtqError::BufferInWithDirect),
 					(BuffSpec::Single(_), BuffSpec::Indirect(_))
-					| (BuffSpec::Multiple(_), BuffSpec::Indirect(_)) => {
-						return Err(VirtqError::BufferInWithDirect)
-					}
+					| (BuffSpec::Multiple(_), BuffSpec::Indirect(_)) => Err(VirtqError::BufferInWithDirect),
 				}
 			}
 		}
@@ -1548,7 +1527,7 @@ impl SplitVq {
 		};
 
 		match (send, recv) {
-			(None, None) => return Err(VirtqError::BufferNotSpecified),
+			(None, None) => Err(VirtqError::BufferNotSpecified),
 			// Only recving descriptorsn (those are writabel by device)
 			(None, Some(recv_desc_lst)) => {
 				for desc in recv_desc_lst {

@@ -21,12 +21,12 @@ use crate::arch;
 use crate::arch::irq;
 use crate::arch::mm::VirtAddr;
 use crate::arch::percore::*;
-use crate::arch::{switch_to_fpu_owner, switch_to_task};
+use crate::arch::switch::{switch_to_fpu_owner, switch_to_task};
 use crate::collections::irqsave;
 use crate::config::*;
+use crate::kernel::scheduler::TaskStacks;
 use crate::scheduler::task::*;
 use crate::synch::spinlock::*;
-use crate::{DEFAULT_STACK_SIZE, KERNEL_STACK_SIZE};
 
 pub mod task;
 
@@ -98,7 +98,7 @@ impl PerCoreScheduler {
 		let task = Rc::new(RefCell::new(Task::new(
 			tid,
 			core_id,
-			TaskStatus::TaskReady,
+			TaskStatus::Ready,
 			prio,
 			stack_size,
 		)));
@@ -147,7 +147,7 @@ impl PerCoreScheduler {
 			let mut current_task_borrowed = self.current_task.borrow_mut();
 			assert_ne!(
 				current_task_borrowed.status,
-				TaskStatus::TaskIdle,
+				TaskStatus::Idle,
 				"Trying to terminate the idle task"
 			);
 
@@ -156,7 +156,7 @@ impl PerCoreScheduler {
 				"Finishing task {} with exit code {}",
 				current_task_borrowed.id, exit_code
 			);
-			current_task_borrowed.status = TaskStatus::TaskFinished;
+			current_task_borrowed.status = TaskStatus::Finished;
 			NO_TASKS.fetch_sub(1, Ordering::SeqCst);
 		};
 
@@ -321,20 +321,11 @@ impl PerCoreScheduler {
 		irqsave(|| self.current_task.borrow_mut().last_wakeup_reason = reason);
 	}
 
-	#[inline]
-	pub fn get_current_user_stack(&self) -> VirtAddr {
-		self.current_task.borrow().user_stack_pointer
-	}
-
-	#[inline]
-	pub fn set_current_user_stack(&mut self, addr: VirtAddr) {
-		self.current_task.borrow_mut().user_stack_pointer = addr;
-	}
-
 	#[cfg(target_arch = "x86_64")]
 	#[inline]
 	pub fn get_current_kernel_stack(&self) -> VirtAddr {
-		self.current_task.borrow().stacks.get_kernel_stack() + DEFAULT_STACK_SIZE - 0x10u64
+		self.current_task.borrow().stacks.get_kernel_stack() + DEFAULT_STACK_SIZE
+			- TaskStacks::MARKER_SIZE
 	}
 
 	#[cfg(target_arch = "x86_64")]
@@ -344,12 +335,12 @@ impl PerCoreScheduler {
 
 		tss.rsp[0] = (current_task_borrowed.stacks.get_kernel_stack()
 			+ current_task_borrowed.stacks.get_kernel_stack_size()
-			- 0x10u64)
+			- TaskStacks::MARKER_SIZE)
 			.as_u64();
 		set_kernel_stack(tss.rsp[0]);
 		tss.ist[0] = (current_task_borrowed.stacks.get_interupt_stack()
 			+ current_task_borrowed.stacks.get_interupt_stack_size()
-			- 0x10u64)
+			- TaskStacks::MARKER_SIZE)
 			.as_u64();
 	}
 
@@ -359,8 +350,8 @@ impl PerCoreScheduler {
 
 		set_kernel_stack((current_task_borrowed.stacks.get_kernel_stack()
 		+ current_task_borrowed.stacks.get_kernel_stack_size()
-		- 0x10u64)
-		.as_u64());
+		- TaskStacks::MARKER_SIZE)
+		.as_u64();
 	}
 
 	/// Save the FPU context for the current FPU owner and restore it for the current task,
@@ -390,14 +381,11 @@ impl PerCoreScheduler {
 			debug!("Cleaning up task {}", borrowed.id);
 
 			// wakeup tasks, which are waiting for task with the identifier id
-			match TASKS.lock().remove(&borrowed.id) {
-				Some(mut queue) => {
-					while let Some(task) = queue.pop_front() {
-						result = true;
-						self.custom_wakeup(task);
-					}
+			if let Some(mut queue) = TASKS.lock().remove(&borrowed.id) {
+				while let Some(task) = queue.pop_front() {
+					result = true;
+					self.custom_wakeup(task);
 				}
-				None => {}
 			}
 		}
 
@@ -430,7 +418,6 @@ impl PerCoreScheduler {
 		let backoff = Backoff::new();
 
 		loop {
-			trace!("Sched");
 			irq::disable();
 			if !self.scheduler() {
 				backoff.reset()
@@ -443,7 +430,6 @@ impl PerCoreScheduler {
 			// This atomic operation guarantees that we cannot miss a wakeup interrupt in between.
 			if !wakeup_tasks {
 				if backoff.is_completed() {
-					trace!("Off");
 					irq::enable_and_wait();
 				} else {
 					irq::enable();
@@ -477,17 +463,16 @@ impl PerCoreScheduler {
 
 		let mut new_task = None;
 
-
-		if status == TaskStatus::TaskRunning {
+		if status == TaskStatus::Running {
 			// A task is currently running.
 			// Check if a task with a equal or higher priority is available.
 			if let Some(task) = self.ready_queue.pop_with_prio(prio) {
 				new_task = Some(task);
 			}
 		} else {
-			if status == TaskStatus::TaskFinished {
+			if status == TaskStatus::Finished {
 				// Mark the finished task as invalid and add it to the finished tasks for a later cleanup.
-				self.current_task.borrow_mut().status = TaskStatus::TaskInvalid;
+				self.current_task.borrow_mut().status = TaskStatus::Invalid;
 				self.finished_tasks.push_back(self.current_task.clone());
 			}
 
@@ -497,7 +482,7 @@ impl PerCoreScheduler {
 				// This available task becomes the new task.
 				debug!("Task is available.");
 				new_task = Some(task);
-			} else if status != TaskStatus::TaskIdle {
+			} else if status != TaskStatus::Idle {
 				// The Idle task becomes the new task.
 				debug!("Only Idle Task is available.");
 				new_task = Some(self.idle_task.clone());
@@ -508,24 +493,24 @@ impl PerCoreScheduler {
 			// There is a new task we want to switch to.
 
 			// Handle the current task.
-			if status == TaskStatus::TaskRunning {
+			if status == TaskStatus::Running {
 				// Mark the running task as ready again and add it back to the queue.
-				self.current_task.borrow_mut().status = TaskStatus::TaskReady;
+				self.current_task.borrow_mut().status = TaskStatus::Ready;
 				self.ready_queue.push(self.current_task.clone());
 			}
 
 			// Handle the new task and get information about it.
 			let (new_id, new_stack_pointer, is_idle) = {
 				let mut borrowed = task.borrow_mut();
-				if borrowed.status != TaskStatus::TaskIdle {
+				if borrowed.status != TaskStatus::Idle {
 					// Mark the new task as running.
-					borrowed.status = TaskStatus::TaskRunning;
+					borrowed.status = TaskStatus::Running;
 				}
 
 				(
 					borrowed.id,
 					borrowed.last_stack_pointer,
-					borrowed.status == TaskStatus::TaskIdle,
+					borrowed.status == TaskStatus::Idle,
 				)
 			};
 
@@ -567,7 +552,7 @@ impl PerCoreScheduler {
 
 			false
 		} else {
-			status == TaskStatus::TaskIdle
+			status == TaskStatus::Idle
 		}
 	}
 }

@@ -6,15 +6,17 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+#[macro_export]
 macro_rules! align_down {
 	($value:expr, $alignment:expr) => {
 		($value) & !($alignment - 1)
 	};
 }
 
+#[macro_export]
 macro_rules! align_up {
 	($value:expr, $alignment:expr) => {
-		align_down!($value + ($alignment - 1), $alignment)
+		$crate::align_down!($value + ($alignment - 1), $alignment)
 	};
 }
 
@@ -25,33 +27,15 @@ macro_rules! align_up {
 #[macro_export]
 macro_rules! print {
 	($($arg:tt)+) => ({
-        $crate::_print(format_args!($($arg)*));
+		$crate::_print(format_args!($($arg)*));
 	});
 }
 
 /// Print formatted text to our console, followed by a newline.
 #[macro_export]
 macro_rules! println {
-    () => (print!("\n"));
-	($($arg:tt)+) => (print!("{}\n", format_args!($($arg)+)));
-}
-
-#[cfg(target_arch = "x86_64")]
-macro_rules! switch_to_kernel {
-	() => {
-		crate::arch::irq::disable();
-		#[allow(unused)]
-		unsafe {
-			let user_stack_pointer;
-			// Store the user stack pointer and switch to the kernel stack
-			llvm_asm!(
-				"mov %rsp, $0; mov $1, %rsp"
-				: "=r"(user_stack_pointer) : "r"(get_kernel_stack()) :: "volatile"
-			);
-			core_scheduler().set_current_user_stack(user_stack_pointer);
-		}
-		crate::arch::irq::enable();
-	}
+	() => ($crate::print!("\n"));
+	($($arg:tt)+) => ($crate::print!("{}\n", format_args!($($arg)+)));
 }
 
 #[cfg(target_arch = "riscv64")]
@@ -74,64 +58,50 @@ macro_rules! switch_to_kernel {
 	}
 }
 
-#[cfg(target_arch = "aarch64")]
-macro_rules! switch_to_kernel {
-	() => {};
-}
-
-#[cfg(target_arch = "x86_64")]
-macro_rules! switch_to_user {
-	() => {
-		use crate::arch::kernel::percore::*;
-
-		crate::arch::irq::disable();
-		let user_stack_pointer = core_scheduler().get_current_user_stack();
-		#[allow(unused)]
-		unsafe {
-			// Switch to the user stack
-			llvm_asm!("mov $0, %rsp" :: "r"(user_stack_pointer) :: "volatile");
-		}
-		crate::arch::irq::enable();
-	}
-}
-
-#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-macro_rules! switch_to_user {
-	() => {};
-}
-
-#[cfg(target_arch = "x86_64")]
+/// Runs `f` on the kernel stack.
+///
+/// All arguments and return values have to fit into registers:
+///
+/// ```
+/// assert!(mem::size_of::<T>() <= mem::size_of::<usize>());
+/// ```
+///
+/// When working with bigger types, manually route the data over pointers:
+///
+/// ```
+/// f(&arg1, &mut ret);
+/// // instead of
+/// let ret = f(arg);
+/// ```
+#[macro_export]
 macro_rules! kernel_function {
-	($f:ident($($x:tt)*)) => {{
-		use crate::arch::kernel::percore::*;
+	($f:ident()) => {
+		$crate::arch::switch::kernel_function0($f)
+	};
 
-		#[allow(unused)]
-		unsafe {
-			crate::arch::irq::disable();
-			let user_stack_pointer;
-			// Store the user stack pointer and switch to the kernel stack
-			llvm_asm!(
-				"mov %rsp, $0; mov $1, %rsp"
-				: "=r"(user_stack_pointer)
-				: "r"(get_kernel_stack())
-				:: "volatile"
-			);
-			core_scheduler().set_current_user_stack(user_stack_pointer);
-			crate::arch::irq::enable();
+	($f:ident($arg1:expr)) => {
+		$crate::arch::switch::kernel_function1($f, $arg1)
+	};
 
-			let ret = $f($($x)*);
+	($f:ident($arg1:expr, $arg2:expr)) => {
+		$crate::arch::switch::kernel_function2($f, $arg1, $arg2)
+	};
 
-			crate::arch::irq::disable();
-			// Switch to the user stack
-			llvm_asm!("mov $0, %rsp"
-				:: "r"(core_scheduler().get_current_user_stack())
-				:: "volatile"
-			);
-			crate::arch::irq::enable();
+	($f:ident($arg1:expr, $arg2:expr, $arg3:expr)) => {
+		$crate::arch::switch::kernel_function3($f, $arg1, $arg2, $arg3)
+	};
 
-			ret
-		}
-	}};
+	($f:ident($arg1:expr, $arg2:expr, $arg3:expr, $arg4:expr)) => {
+		$crate::arch::switch::kernel_function4($f, $arg1, $arg2, $arg3, $arg4)
+	};
+
+	($f:ident($arg1:expr, $arg2:expr, $arg3:expr, $arg4:expr, $arg5:expr)) => {
+		$crate::arch::switch::kernel_function5($f, $arg1, $arg2, $arg3, $arg4, $arg5)
+	};
+
+	($f:ident($arg1:expr, $arg2:expr, $arg3:expr, $arg4:expr, $arg5:expr, $arg6:expr)) => {
+		$crate::arch::switch::kernel_function6($f, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6)
+	};
 }
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]

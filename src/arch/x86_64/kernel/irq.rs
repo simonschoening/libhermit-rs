@@ -13,12 +13,13 @@ use crate::arch::x86_64::kernel::processor;
 use crate::arch::x86_64::mm::paging;
 use crate::scheduler;
 use crate::synch::spinlock::SpinlockIrqSave;
-use crate::x86::bits64::rflags;
 
 use crate::alloc::string::ToString;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use core::fmt;
+use x86::bits64::rflags::{self, RFlags};
+use x86::irq;
 
 static IRQ_NAMES: SpinlockIrqSave<BTreeMap<u32, String>> = SpinlockIrqSave::new(BTreeMap::new());
 
@@ -44,10 +45,10 @@ pub struct ExceptionStackFrame {
 }
 
 impl fmt::Debug for ExceptionStackFrame {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		struct Hex(u64);
 		impl fmt::Debug for Hex {
-			fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 				write!(f, "{:#x}", self.0)
 			}
 		}
@@ -65,7 +66,9 @@ impl fmt::Debug for ExceptionStackFrame {
 /// Enable Interrupts
 #[inline]
 pub fn enable() {
-	unsafe { llvm_asm!("sti" :::: "volatile") };
+	unsafe {
+		irq::enable();
+	}
 }
 
 /// Enable Interrupts and wait for the next interrupt (HLT instruction)
@@ -74,13 +77,17 @@ pub fn enable() {
 /// This is important, because another CPU could call wakeup_core right when we decide to wait for the next interrupt.
 #[inline]
 pub fn enable_and_wait() {
-	unsafe { llvm_asm!("sti; hlt" :::: "volatile") };
+	unsafe {
+		asm!("sti; hlt", options(nomem, nostack));
+	}
 }
 
 /// Disable Interrupts
 #[inline]
 pub fn disable() {
-	unsafe { llvm_asm!("cli" :::: "volatile") };
+	unsafe {
+		irq::disable();
+	}
 }
 
 /// Disable IRQs (nested)
@@ -89,20 +96,13 @@ pub fn disable() {
 /// This function together with nested_enable can be used
 /// in situations when interrupts shouldn't be activated if they
 /// were not activated before calling this function.
-#[cfg(target_os = "hermit")]
 #[inline]
 pub fn nested_disable() -> bool {
-	unsafe {
-		let flags: u64;
-
-		llvm_asm!("pushfq; popq $0; cli" : "=r"(flags) :: "memory" : "volatile");
-		rflags::RFlags::from_bits_truncate(flags).contains(rflags::RFlags::FLAGS_IF)
+	cfg!(target_os = "hermit") && {
+		let ret = rflags::read().contains(RFlags::FLAGS_IF);
+		disable();
+		ret
 	}
-}
-
-#[cfg(not(target_os = "hermit"))]
-pub fn nested_disable() -> bool {
-	false
 }
 
 /// Enable IRQs (nested)
@@ -218,175 +218,175 @@ fn unhandled_interrupt(irq_number: u8) {
 	increment_irq_counter((32 + irq_number).into());
 }
 
-extern "x86-interrupt" fn unhandled_interrupt0(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt0(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(0);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt1(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt1(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(1);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt2(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt2(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(2);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt3(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt3(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(3);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt4(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt4(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(4);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt5(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt5(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(5);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt6(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt6(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(6);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt7(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt7(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(7);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt8(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt8(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(8);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt9(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt9(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(9);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt10(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt10(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(10);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt11(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt11(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(11);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt12(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt12(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(12);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt13(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt13(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(13);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt14(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt14(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(14);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt15(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt15(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(15);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt16(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt16(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(16);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt17(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt17(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(17);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt18(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt18(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(18);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt19(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt19(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(19);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt20(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt20(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(20);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt21(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt21(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(21);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt22(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt22(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(22);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt23(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt23(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(23);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt24(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt24(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(24);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt25(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt25(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(25);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt26(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt26(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(26);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt27(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt27(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(27);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt28(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt28(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(28);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt29(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt29(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(29);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt30(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt30(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(30);
 }
 
-extern "x86-interrupt" fn unhandled_interrupt31(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unhandled_interrupt31(_stack_frame: ExceptionStackFrame) {
 	unhandled_interrupt(31);
 }
 
-extern "x86-interrupt" fn unknown_interrupt(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn unknown_interrupt(_stack_frame: ExceptionStackFrame) {
 	info!("Receive unknown interrupt");
 	apic::eoi();
 }
 
-extern "x86-interrupt" fn divide_error_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn divide_error_exception(stack_frame: ExceptionStackFrame) {
 	error!("Divide Error (#DE) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn debug_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn debug_exception(stack_frame: ExceptionStackFrame) {
 	error!("Debug (#DB) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn nmi_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn nmi_exception(stack_frame: ExceptionStackFrame) {
 	error!("Non-Maskable Interrupt (NMI) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn breakpoint_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn breakpoint_exception(stack_frame: ExceptionStackFrame) {
 	error!("Breakpoint (#BP) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn overflow_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn overflow_exception(stack_frame: ExceptionStackFrame) {
 	error!("Overflow (#OF) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn bound_range_exceeded_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn bound_range_exceeded_exception(stack_frame: ExceptionStackFrame) {
 	error!("BOUND Range Exceeded (#BR) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn invalid_opcode_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn invalid_opcode_exception(stack_frame: ExceptionStackFrame) {
 	error!("Invalid Opcode (#UD) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn device_not_available_exception(_stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn device_not_available_exception(_stack_frame: ExceptionStackFrame) {
 	// We set the CR0_TASK_SWITCHED flag every time we switch to a task.
 	// This causes the "Device Not Available" Exception (int #7) to be thrown as soon as we use the FPU for the first time.
 
@@ -394,7 +394,7 @@ extern "x86-interrupt" fn device_not_available_exception(_stack_frame: &mut Exce
 
 	// Clear CR0_TASK_SWITCHED so this doesn't happen again before the next switch.
 	unsafe {
-		llvm_asm!("clts" :::: "volatile");
+		asm!("clts", options(nomem, nostack));
 	}
 
 	// Let the scheduler set up the FPU for the current task.
@@ -402,7 +402,7 @@ extern "x86-interrupt" fn device_not_available_exception(_stack_frame: &mut Exce
 }
 
 extern "x86-interrupt" fn double_fault_exception(
-	stack_frame: &mut ExceptionStackFrame,
+	stack_frame: ExceptionStackFrame,
 	error_code: u64,
 ) {
 	error!(
@@ -412,9 +412,7 @@ extern "x86-interrupt" fn double_fault_exception(
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn coprocessor_segment_overrun_exception(
-	stack_frame: &mut ExceptionStackFrame,
-) {
+extern "x86-interrupt" fn coprocessor_segment_overrun_exception(stack_frame: ExceptionStackFrame) {
 	error!(
 		"CoProcessor Segment Overrun (#MF) Exception: {:#?}",
 		stack_frame
@@ -422,18 +420,18 @@ extern "x86-interrupt" fn coprocessor_segment_overrun_exception(
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn invalid_tss_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn invalid_tss_exception(stack_frame: ExceptionStackFrame) {
 	error!("Invalid TSS (#TS) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn segment_not_present_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn segment_not_present_exception(stack_frame: ExceptionStackFrame) {
 	error!("Segment Not Present (#NP) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
 extern "x86-interrupt" fn stack_segment_fault_exception(
-	stack_frame: &mut ExceptionStackFrame,
+	stack_frame: ExceptionStackFrame,
 	error_code: u64,
 ) {
 	error!(
@@ -444,7 +442,7 @@ extern "x86-interrupt" fn stack_segment_fault_exception(
 }
 
 extern "x86-interrupt" fn general_protection_exception(
-	stack_frame: &mut ExceptionStackFrame,
+	stack_frame: ExceptionStackFrame,
 	error_code: u64,
 ) {
 	error!(
@@ -459,32 +457,32 @@ extern "x86-interrupt" fn general_protection_exception(
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn floating_point_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn floating_point_exception(stack_frame: ExceptionStackFrame) {
 	error!("Floating-Point Error (#MF) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn alignment_check_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn alignment_check_exception(stack_frame: ExceptionStackFrame) {
 	error!("Alignment Check (#AC) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn machine_check_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn machine_check_exception(stack_frame: ExceptionStackFrame) {
 	error!("Machine Check (#MC) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn simd_floating_point_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn simd_floating_point_exception(stack_frame: ExceptionStackFrame) {
 	error!("SIMD Floating-Point (#XM) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn virtualization_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn virtualization_exception(stack_frame: ExceptionStackFrame) {
 	error!("Virtualization (#VE) Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }
 
-extern "x86-interrupt" fn reserved_exception(stack_frame: &mut ExceptionStackFrame) {
+extern "x86-interrupt" fn reserved_exception(stack_frame: ExceptionStackFrame) {
 	error!("Reserved Exception: {:#?}", stack_frame);
 	scheduler::abort();
 }

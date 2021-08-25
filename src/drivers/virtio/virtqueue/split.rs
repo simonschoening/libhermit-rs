@@ -982,15 +982,8 @@ impl SplitVq {
 									desc_lst: vec![recv_desc].into_boxed_slice(),
 									len: recv_data_slice.len(),
 									next_write: 0,
-								}),
-								vq: master,
-								ret_send: false,
-								ret_recv: false,
-								reusable: false,
-							}),
-							await_queue: None,
-						})
-					}
+								}),#[cfg(not(feature = "pci"))]
+								let check_scheduler = false;
 					(BuffSpec::Indirect(send_size_lst), BuffSpec::Indirect(recv_size_lst)) => {
 						let send_data_slice = unsafe { (*send_data).as_slice_u8() };
 						let mut send_desc_lst: Vec<MemDescr> =

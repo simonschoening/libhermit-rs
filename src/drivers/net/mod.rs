@@ -23,8 +23,11 @@ use crate::arch::kernel::pci::get_network_driver;
 #[cfg(target_arch = "riscv64")]
 use crate::arch::kernel::mmio::get_network_driver;
 use crate::arch::kernel::percore::*;
+use crate::scheduler::task::TaskHandle;
 use crate::synch::semaphore::*;
 use crate::synch::spinlock::SpinlockIrqSave;
+use alloc::collections::BTreeMap;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 /// A trait for accessing the network interface
 pub trait NetworkInterface {
@@ -60,8 +63,8 @@ pub extern "C" fn set_polling_mode(value: bool) {
 		*guard += 1;
 
 		if *guard == 1 {
-			#[cfg(feature = "pci")]
-			if let Some(driver) = crate::arch::kernel::pci::get_network_driver() {
+			#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+			if let Some(driver) = get_network_driver() {
 				driver.lock().set_polling_mode(value)
 			}
 		}
@@ -69,8 +72,8 @@ pub extern "C" fn set_polling_mode(value: bool) {
 		*guard -= 1;
 
 		if *guard == 0 {
-			#[cfg(feature = "pci")]
-			if let Some(driver) = crate::arch::kernel::pci::get_network_driver() {
+			#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+			if let Some(driver) = get_network_driver() {
 				driver.lock().set_polling_mode(value)
 			}
 		}
@@ -90,6 +93,7 @@ pub extern "x86-interrupt" fn network_irqhandler(_stack_frame: ExceptionStackFra
 	debug!("Receive network interrupt");
 	apic::eoi();
 
+	#[cfg(feature = "pci")]
 	let check_scheduler = match get_network_driver() {
 		Some(driver) => driver.lock().handle_interrupt(),
 		_ => {
@@ -97,6 +101,7 @@ pub extern "x86-interrupt" fn network_irqhandler(_stack_frame: ExceptionStackFra
 			false
 		}
 	};
+	
 	#[cfg(not(feature = "pci"))]
 	let check_scheduler = false;
 

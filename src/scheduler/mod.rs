@@ -350,7 +350,7 @@ impl PerCoreScheduler {
 
 		set_kernel_stack((current_task_borrowed.stacks.get_kernel_stack()
 		+ current_task_borrowed.stacks.get_kernel_stack_size()
-		- 0x10u64)
+		- TaskStacks::MARKER_SIZE)
 		.as_u64());
 	}
 
@@ -418,7 +418,6 @@ impl PerCoreScheduler {
 		let backoff = Backoff::new();
 
 		loop {
-			trace!("Sched");
 			irq::disable();
 			if !self.scheduler() {
 				backoff.reset()
@@ -431,7 +430,6 @@ impl PerCoreScheduler {
 			// This atomic operation guarantees that we cannot miss a wakeup interrupt in between.
 			if !wakeup_tasks {
 				if backoff.is_completed() {
-					trace!("Off");
 					irq::enable_and_wait();
 				} else {
 					irq::enable();

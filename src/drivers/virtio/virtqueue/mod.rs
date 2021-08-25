@@ -1599,10 +1599,6 @@ impl BufferToken {
 	/// The same error will be triggered in case the respective buffer wasn't even existing, as not all transfers consist
 	/// of send and recv buffers.
 	///
-	/// This write DOES NOT reduce the overall size of the buffer to length_of(`K` or `H`). The device will observe the length of
-	/// the buffer as given by `BufferToken.len()`.
-	/// Use `BufferToken.restr_size()` in order to change this property.
-	///
 	///
 	/// # Detailed Description
 	/// The respective send and recv buffers (see [BufferToken](BufferToken) docs for details on buffers) consist of multiple

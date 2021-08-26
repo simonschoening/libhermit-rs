@@ -16,6 +16,7 @@ pub mod serial;
 mod start;
 mod sbi;
 mod devicetree;
+pub mod switch;
 pub mod systemtime;
 
 pub use crate::arch::riscv::kernel::devicetree::{get_mem_base, init_drivers};
@@ -122,8 +123,6 @@ impl fmt::Debug for BootInfo {
 static mut BOOT_INFO: *mut BootInfo = ptr::null_mut();
 
 // FUNCTIONS
-
-global_asm!(include_str!("switch.s"));
 
 pub fn get_image_size() -> usize {
 	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).image_size) as usize }

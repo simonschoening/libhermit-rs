@@ -14,7 +14,7 @@
 
 
 .align 16
-// This function should only be called if the fp registers are saved
+// This function should only be called if the fp registers are clean
 switch_to_task_fp_clean:
 	// a0 = old_stack => the address to store the old rsp
 	// a1 = new_stack => stack pointer of the new task
@@ -172,7 +172,7 @@ switch_to_task_fp_clean:
 
 
 .align 16
-// This function should only be called if the fp registers are saved
+// This function should only be called if the fp registers are dirty
 switch_to_task_fp_dirty:
 	// a0 = old_stack => the address to store the old rsp
 	// a1 = new_stack => stack pointer of the new task

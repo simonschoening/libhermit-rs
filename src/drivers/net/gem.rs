@@ -21,8 +21,8 @@ use riscv::register::*;
 //const GEM_IRQ: u32 = 53; //For Sifive FU540
 
 // https://github.com/torvalds/linux/blob/v4.15/drivers/net/ethernet/cadence/macb.h
-/// Register offsets
 register_structs! {
+	/// Register offsets
     Registers {
         // Control register: read-write
         (0x000 => network_control: ReadWrite<u32, NetworkControl::Register>),

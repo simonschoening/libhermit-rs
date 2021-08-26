@@ -351,7 +351,7 @@ impl PerCoreScheduler {
 		set_kernel_stack((current_task_borrowed.stacks.get_kernel_stack()
 		+ current_task_borrowed.stacks.get_kernel_stack_size()
 		- TaskStacks::MARKER_SIZE)
-		.as_u64();
+		.as_u64());
 	}
 
 	/// Save the FPU context for the current FPU owner and restore it for the current task,

@@ -5,7 +5,7 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use core::convert::TryInto;
+use core::{alloc::AllocError, convert::TryInto};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::arch::riscv::mm::paging::{BasePageSize, PageSize};
@@ -40,7 +40,7 @@ pub fn total_memory_size() -> usize {
 	TOTAL_MEMORY.load(Ordering::SeqCst)
 }
 
-pub fn allocate(size: usize) -> Result<PhysAddr, ()> {
+pub fn allocate(size: usize) -> Result<PhysAddr, AllocError> {
 	assert!(size > 0);
 	assert_eq!(
 		size % BasePageSize::SIZE,
@@ -59,7 +59,7 @@ pub fn allocate(size: usize) -> Result<PhysAddr, ()> {
 	))
 }
 
-pub fn allocate_aligned(size: usize, alignment: usize) -> Result<PhysAddr, ()> {
+pub fn allocate_aligned(size: usize, alignment: usize) -> Result<PhysAddr, AllocError> {
 	assert!(size > 0);
 	assert!(alignment > 0);
 	assert_eq!(

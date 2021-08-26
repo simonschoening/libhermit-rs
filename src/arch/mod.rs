@@ -79,10 +79,7 @@ pub use crate::arch::riscv::kernel::irq;
 pub use crate::arch::riscv::kernel::systemtime::get_boot_time;
 
 #[cfg(target_arch = "riscv64")]
-pub use crate::arch::riscv::kernel::scheduler::switch_to_task;
-
-#[cfg(target_arch = "riscv64")]
-pub use crate::arch::riscv::kernel::scheduler::switch_to_task as switch_to_fpu_owner;
+pub use crate::arch::riscv::kernel::switch;
 
 #[cfg(target_arch = "aarch64")]
 pub use crate::arch::aarch64::kernel::switch;

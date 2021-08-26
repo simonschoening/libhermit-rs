@@ -22,7 +22,6 @@ use crate::scheduler::task::{Task, TaskFrame};
 use crate::{DEFAULT_STACK_SIZE, KERNEL_STACK_SIZE};
 use alloc::rc::Rc;
 use core::cell::RefCell;
-use riscv::register::sstatus;
 
 /* extern "C" {
 	static tls_start: u8;
@@ -185,6 +184,11 @@ pub enum TaskStacks {
 }
 
 impl TaskStacks {
+	/// Size of the debug marker at the very top of each stack.
+	///
+	/// We have a marker at the very top of the stack for debugging (`0xdeadbeef`), which should not be overridden.
+	pub const MARKER_SIZE: usize = 0x10;
+
 	pub fn new(size: usize) -> Self {
 		let user_stack_size = if size < KERNEL_STACK_SIZE {
 			KERNEL_STACK_SIZE
@@ -469,14 +473,13 @@ extern "C" fn task_entry(func: extern "C" fn(usize), arg: usize) {
 	}*/
 
 	// Call the actual entry point of the task.
-	//println!("OKAAAYYY: {:p} , arg: {:?}",((func as usize -31*8 ) as *const crate::arch::riscv::kernel::scheduler::State), arg);
 	//unsafe{debug!("state: {:#X?}", *((func as usize -31*8 ) as *const crate::arch::riscv::kernel::scheduler::State));}
 	//panic!("Not impl");
 	//println!("Task start");
 	func(arg);
 	//println!("Task end");
 
-	switch_to_kernel!();
+	// switch_to_kernel!();
 
 	// Exit task
 	core_scheduler().exit(0)
@@ -550,19 +553,4 @@ pub fn wakeup_handler() {
 #[no_mangle]
 pub fn set_current_kernel_stack() {
 	core_scheduler().set_current_kernel_stack();
-}
-
-extern "C" {
-	pub fn switch_to_task_fp_clean(old_stack: *mut usize, new_stack: usize);
-	pub fn switch_to_task_fp_dirty(old_stack: *mut usize, new_stack: usize);
-}
-
-/// Saves the floating point registers when needed and switches task
-pub unsafe fn switch_to_task(old_stack: *mut usize, new_stack: usize) {
-	if sstatus::read().fs() == sstatus::FS::Dirty {
-		switch_to_task_fp_dirty(old_stack, new_stack);
-	}
-	else {
-		switch_to_task_fp_clean(old_stack, new_stack);
-	}	
 }

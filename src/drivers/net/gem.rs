@@ -12,6 +12,7 @@ use crate::drivers::error::DriverError;
 use crate::drivers::net::{netwakeup, network_irqhandler, NetworkInterface};
 
 use tock_registers::registers::*;
+use tock_registers::interfaces::*;
 use tock_registers::{register_structs, register_bitfields};
 
 use riscv::register::*;

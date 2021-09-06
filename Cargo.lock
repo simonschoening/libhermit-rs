@@ -70,7 +70,7 @@ version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "509fc35485a2b4ddbacabe0bf2212cdfff88da93658608e5cc651afcb75b7733"
 dependencies = [
- "tock-registers 0.7.0",
+ "tock-registers",
 ]
 
 [[package]]
@@ -314,7 +314,7 @@ dependencies = [
  "qemu-exit",
  "riscv",
  "scopeguard",
- "tock-registers 0.6.0",
+ "tock-registers",
  "trapframe",
  "x86",
 ]
@@ -350,10 +350,6 @@ dependencies = [
  "quote",
  "unicode-xid",
 ]
-
-[[package]]
-name = "tock-registers"
-version = "0.6.0"
 
 [[package]]
 name = "tock-registers"

@@ -9,6 +9,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use core::{alloc::AllocError, convert::TryInto};
 use multiboot::information::{MemoryType, Multiboot};
 
+pub use crate::arch::x86_64::kernel::get_mem_base;
 use crate::arch::x86_64::kernel::{get_limit, get_mbinfo};
 use crate::arch::x86_64::mm::paging::{BasePageSize, PageSize};
 use crate::arch::x86_64::mm::MEM;
@@ -16,7 +17,6 @@ use crate::arch::x86_64::mm::{PhysAddr, VirtAddr};
 use crate::mm;
 use crate::mm::freelist::{FreeList, FreeListEntry};
 use crate::synch::spinlock::*;
-pub use crate::arch::x86_64::kernel::get_mem_base;
 
 static PHYSICAL_FREE_LIST: SpinlockIrqSave<FreeList> = SpinlockIrqSave::new(FreeList::new());
 static TOTAL_MEMORY: AtomicUsize = AtomicUsize::new(0);

@@ -12,8 +12,7 @@ extern "C" {
 pub unsafe fn switch_to_task(old_stack: *mut usize, new_stack: usize) {
 	if sstatus::read().fs() == sstatus::FS::Dirty {
 		switch_to_task_fp_dirty(old_stack, new_stack);
-	}
-	else {
+	} else {
 		switch_to_task_fp_clean(old_stack, new_stack);
-	}	
+	}
 }

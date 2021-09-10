@@ -8,7 +8,10 @@
 
 #![allow(clippy::result_unit_err)]
 
-#[cfg(all(not(feature = "newlib"), any(all(target_arch = "x86_64", feature = "pci"), target_arch = "riscv64")))]
+#[cfg(all(
+	not(feature = "newlib"),
+	any(all(target_arch = "x86_64", feature = "pci"), target_arch = "riscv64")
+))]
 use crate::drivers::net::*;
 use crate::environment;
 #[cfg(feature = "newlib")]
@@ -154,13 +157,19 @@ pub fn sys_rx_buffer_consumed(handle: usize) -> Result<(), ()> {
 	kernel_function!(__sys_rx_buffer_consumed(handle))
 }
 
-#[cfg(all(not(feature = "newlib"), any(all(target_arch = "x86_64", feature = "pci"), target_arch = "riscv64")))]
+#[cfg(all(
+	not(feature = "newlib"),
+	any(all(target_arch = "x86_64", feature = "pci"), target_arch = "riscv64")
+))]
 #[no_mangle]
 pub extern "C" fn sys_netwait() {
 	kernel_function!(netwait());
 }
 
-#[cfg(all(not(feature = "newlib"), any(all(target_arch = "x86_64", feature = "pci"), target_arch = "riscv64")))]
+#[cfg(all(
+	not(feature = "newlib"),
+	any(all(target_arch = "x86_64", feature = "pci"), target_arch = "riscv64")
+))]
 #[no_mangle]
 pub extern "C" fn sys_set_network_polling_mode(value: bool) {
 	kernel_function!(set_polling_mode(value));

@@ -6,11 +6,10 @@
 // copied, modified, or distributed except according to those terms.
 
 // TODO: sifive UART
-use core::ptr;
 use crate::arch::riscv::kernel::sbi;
+use core::ptr;
 
-pub struct SerialPort {
-}
+pub struct SerialPort {}
 
 impl SerialPort {
 	pub const fn new(port_address: u32) -> Self {

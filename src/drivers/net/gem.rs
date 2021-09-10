@@ -5,15 +5,15 @@ use core::mem;
 
 use crate::arch::kernel::irq::*;
 use crate::arch::kernel::pci;
-use crate::arch::kernel::percore::{core_scheduler};
+use crate::arch::kernel::percore::core_scheduler;
 use crate::arch::mm::paging::virt_to_phys;
 use crate::arch::mm::VirtAddr;
 use crate::drivers::error::DriverError;
 use crate::drivers::net::{netwakeup, network_irqhandler, NetworkInterface};
 
-use tock_registers::registers::*;
 use tock_registers::interfaces::*;
-use tock_registers::{register_structs, register_bitfields};
+use tock_registers::registers::*;
+use tock_registers::{register_bitfields, register_structs};
 
 use riscv::register::*;
 
@@ -24,49 +24,49 @@ use riscv::register::*;
 // https://github.com/torvalds/linux/blob/v4.15/drivers/net/ethernet/cadence/macb.h
 register_structs! {
 	/// Register offsets
-    Registers {
-        // Control register: read-write
-        (0x000 => network_control: ReadWrite<u32, NetworkControl::Register>),
-        (0x004 => network_config: ReadWrite<u32, NetworkConfig::Register>),
+	Registers {
+		// Control register: read-write
+		(0x000 => network_control: ReadWrite<u32, NetworkControl::Register>),
+		(0x004 => network_config: ReadWrite<u32, NetworkConfig::Register>),
 		(0x008 => network_status: ReadOnly<u32, NetworkStatus::Register>),
 		(0x00C => _reserved1),
 		(0x010 => dma_config: ReadWrite<u32, DMAConfig::Register>),
-        (0x014 => transmit_status: ReadWrite<u32, TransmitStatus::Register>),
-        (0x018 => rx_qbar: ReadWrite<u32>),
-        (0x01c => tx_qbar: ReadWrite<u32>),
-        (0x020 => receive_status: ReadWrite<u32, RecieveStatus::Register>),
+		(0x014 => transmit_status: ReadWrite<u32, TransmitStatus::Register>),
+		(0x018 => rx_qbar: ReadWrite<u32>),
+		(0x01c => tx_qbar: ReadWrite<u32>),
+		(0x020 => receive_status: ReadWrite<u32, RecieveStatus::Register>),
 		(0x024 => int_status: ReadWrite<u32, Interrupts::Register>),
 		(0x028 => int_enable: WriteOnly<u32, Interrupts::Register>),
-        (0x02C => int_disable: WriteOnly<u32, Interrupts::Register>),
+		(0x02C => int_disable: WriteOnly<u32, Interrupts::Register>),
 		(0x030 => _reserved3),
 		(0x034 => phy_maintenance: ReadWrite<u32, PHYMaintenance::Register>),
 		(0x038 => _reserved4),
 		(0x088 => spec_add1_bottom: ReadWrite<u32>),
 		(0x08C => spec_add1_top: ReadWrite<u32>),
 		(0x090 => _reserved5),
-        (0x1000 => @END),
-    }
+		(0x1000 => @END),
+	}
 }
 
 register_bitfields! [
-    // First parameter is the register width. Can be u8, u16, u32, or u64.
-    u32,
+	// First parameter is the register width. Can be u8, u16, u32, or u64.
+	u32,
 
-    NetworkControl [
+	NetworkControl [
 		STARTTX	OFFSET(9) NUMBITS(1) [],
-        STATCLR	OFFSET(5) NUMBITS(1) [],
+		STATCLR	OFFSET(5) NUMBITS(1) [],
 		MDEN	OFFSET(4) NUMBITS(1) [],
 		TXEN	OFFSET(3) NUMBITS(1) [],
 		RXEN	OFFSET(2) NUMBITS(1) [],
-    ],
-    NetworkConfig [
+	],
+	NetworkConfig [
 		RXCHKSUMEN	OFFSET(24) NUMBITS(1) [],
 		DBUS_WIDTH	OFFSET(21) NUMBITS(2) [
 			DBW32 = 0,
 			DBW64 = 1,
 			DBW128 = 2
 		],
-        MDCCLKDIV 	OFFSET(18) NUMBITS(3) [
+		MDCCLKDIV 	OFFSET(18) NUMBITS(3) [
 			CLK_DIV8 = 0,
 			CLK_DIV16 = 1,
 			CLK_DIV32 = 2,
@@ -83,10 +83,10 @@ register_bitfields! [
 		BCASTDI		OFFSET(5) NUMBITS(1) [],
 		COPYALLEN	OFFSET(4) NUMBITS(1) [],
 		FDEN OFFSET(1) NUMBITS(1) [],
-    ],
+	],
 	NetworkStatus [
-        PHY_MGMT_IDLE	OFFSET(2) NUMBITS(1) [],
-    ],
+		PHY_MGMT_IDLE	OFFSET(2) NUMBITS(1) [],
+	],
 	DMAConfig [
 		RXBUF		OFFSET(16) NUMBITS(8) [],
 		TCPCKSUM	OFFSET(11) NUMBITS(1) [],
@@ -102,22 +102,22 @@ register_bitfields! [
 			INCR8 = 0b01000,
 			INCR16 = 0b10000
 		],
-    ],
-    RecieveStatus [
-        FRAMERX  OFFSET(1) NUMBITS(1) [],
-    ],
-    TransmitStatus [
-        TXCOMPL	OFFSET(5) NUMBITS(1) [],
+	],
+	RecieveStatus [
+		FRAMERX  OFFSET(1) NUMBITS(1) [],
+	],
+	TransmitStatus [
+		TXCOMPL	OFFSET(5) NUMBITS(1) [],
 		TXGO	OFFSET(3) NUMBITS(1) [],
-    ],
-    Interrupts [
-        TSU_SEC_INCR	OFFSET(26) NUMBITS(1) [],
+	],
+	Interrupts [
+		TSU_SEC_INCR	OFFSET(26) NUMBITS(1) [],
 		TXCOMPL			OFFSET(7) NUMBITS(1) [],
 		FRAMERX			OFFSET(1) NUMBITS(1) [],
 
-    ],
+	],
 	PHYMaintenance [
-        CLAUSE_22	OFFSET(30) NUMBITS(1) [],
+		CLAUSE_22	OFFSET(30) NUMBITS(1) [],
 		OP			OFFSET(28) NUMBITS(2) [
 			READ = 0b10,
 			WRITE = 0b01,
@@ -128,11 +128,11 @@ register_bitfields! [
 			MUST_BE_10 = 0b10
 		],
 		DATA		OFFSET(0) NUMBITS(16) [],
-    ],
+	],
 ];
 
 ///  PHY reg index
-enum PhyReg{
+enum PhyReg {
 	Control = 0,
 	Status = 1,
 	ID1 = 2,
@@ -146,19 +146,19 @@ enum PhyReg{
 }
 
 ///  PHY Status reg mask and offset
-enum PhyStatus{
+enum PhyStatus {
 	ANCompleteOffset = 5,
 	ANCompleteMask = 0x20,
 	ANCapOffset = 3,
 	ANCapMask = 0x4,
 }
 
-enum PhyControl{
+enum PhyControl {
 	ANEnableOffset = 12,
 	ANEnableMask = 0x1000,
 }
 
-enum PhyPartnerAbility{
+enum PhyPartnerAbility {
 	ANEnableOffset = 12,
 	ANEnableMask = 0x1000,
 }
@@ -241,11 +241,8 @@ impl NetworkInterface for GEMDriver {
 				self.tx_counter = (index + 1) % TX_BUF_NUM;
 
 				// Address of the tx buffer
-				let buffer = self.txbuffer + (index*TX_BUF_LEN) as u64;
-				return Ok((
-					buffer.as_mut_ptr::<u8>(),
-					index as usize,
-				));
+				let buffer = self.txbuffer + (index * TX_BUF_LEN) as u64;
+				return Ok((buffer.as_mut_ptr::<u8>(), index as usize));
 			}
 		}
 
@@ -257,24 +254,31 @@ impl NetworkInterface for GEMDriver {
 		debug!("send_tx_buffer");
 
 		// Address of word[1] of the buffer descriptor
-		let word1_addr = (self.txbuffer_list + (id*8 + 4) as u64).as_mut_ptr::<u32>();
-		let word1 = unsafe {core::ptr::read_volatile(word1_addr)};
+		let word1_addr = (self.txbuffer_list + (id * 8 + 4) as u64).as_mut_ptr::<u32>();
+		let word1 = unsafe { core::ptr::read_volatile(word1_addr) };
 
-		unsafe{
+		unsafe {
 			// Set length of frame and mark as single buffer Ethernet frame
-			core::ptr::write_volatile(word1_addr, (word1 & TX_DESC_WRAP) | TX_DESC_LAST | len as u32);
+			core::ptr::write_volatile(
+				word1_addr,
+				(word1 & TX_DESC_WRAP) | TX_DESC_LAST | len as u32,
+			);
 
 			// Enable TX
-			(*self.gem).network_control.modify(NetworkControl::TXEN::SET);
+			(*self.gem)
+				.network_control
+				.modify(NetworkControl::TXEN::SET);
 			// Start transmission
-			(*self.gem).network_control.modify(NetworkControl::STARTTX::SET);
+			(*self.gem)
+				.network_control
+				.modify(NetworkControl::STARTTX::SET);
 
 			// (*GEM).network_control.modify(NetworkControl::RXEN::CLEAR);
 		}
 
 		//trace!("SSTATUS: {:x?}", sstatus::read().sie());
 		//loop{}
-        Ok(())
+		Ok(())
 	}
 
 	fn has_packet(&self) -> bool {
@@ -292,8 +296,9 @@ impl NetworkInterface for GEMDriver {
 		// Scan the buffer descriptor queue starting from rx_count
 		match self.next_rx_index() {
 			Some(index) => {
-				let word1_addr = (self.rxbuffer_list + (index*8 + 4) as u64);
-				let word1_entry = unsafe {core::ptr::read_volatile(word1_addr.as_mut_ptr::<u32>())};
+				let word1_addr = (self.rxbuffer_list + (index * 8 + 4) as u64);
+				let word1_entry =
+					unsafe { core::ptr::read_volatile(word1_addr.as_mut_ptr::<u32>()) };
 				let length = word1_entry & 0x1FFF;
 				debug!("Recieved frame in buffer {}, length: {}", index, length);
 
@@ -301,20 +306,14 @@ impl NetworkInterface for GEMDriver {
 				self.rx_counter = (index + 1) % RX_BUF_NUM;
 				let buffer = unsafe {
 					core::slice::from_raw_parts(
-						(self.rxbuffer.as_usize() + (index*RX_BUF_LEN) as usize)
-							as *const u8,
+						(self.rxbuffer.as_usize() + (index * RX_BUF_LEN) as usize) as *const u8,
 						length as usize,
 					)
 				};
 				debug!("BUFFER: {:x?}", buffer);
-				Ok((
-					buffer,
-					index as usize,
-				))
-			},
-			None => {
-				Err(())
+				Ok((buffer, index as usize))
 			}
+			None => Err(()),
 		}
 	}
 
@@ -322,7 +321,7 @@ impl NetworkInterface for GEMDriver {
 	fn rx_buffer_consumed(&mut self, handle: usize) {
 		debug!("rx_buffer_consumed");
 
-		let word0_addr = (self.rxbuffer_list + (handle*8) as u64);
+		let word0_addr = (self.rxbuffer_list + (handle * 8) as u64);
 		let word1_addr = word0_addr + 4 as u64;
 
 		unsafe {
@@ -351,35 +350,40 @@ impl NetworkInterface for GEMDriver {
 
 	fn handle_interrupt(&mut self) -> bool {
 		debug!("handle_interrupt");
-		let int_status = unsafe {
-			(*self.gem).int_status.extract()
-		};
+		let int_status = unsafe { (*self.gem).int_status.extract() };
 
-		let receive_status = unsafe {
-			(*self.gem).receive_status.extract()
-		};
+		let receive_status = unsafe { (*self.gem).receive_status.extract() };
 
-		let transmit_status = unsafe {
-			(*self.gem).transmit_status.extract()
-		};
+		let transmit_status = unsafe { (*self.gem).transmit_status.extract() };
 
 		if transmit_status.is_set(TransmitStatus::TXCOMPL) {
 			trace!("TX COMPLETE");
 			//loop{}
 			unsafe {
-				(*self.gem).int_status.modify_no_read(int_status, Interrupts::TXCOMPL::SET);
-				(*self.gem).transmit_status.modify_no_read(transmit_status, TransmitStatus::TXCOMPL::SET);
-				(*self.gem).network_control.modify(NetworkControl::TXEN::CLEAR);
+				(*self.gem)
+					.int_status
+					.modify_no_read(int_status, Interrupts::TXCOMPL::SET);
+				(*self.gem)
+					.transmit_status
+					.modify_no_read(transmit_status, TransmitStatus::TXCOMPL::SET);
+				(*self.gem)
+					.network_control
+					.modify(NetworkControl::TXEN::CLEAR);
 			}
 			self.tx_len[0] = 0;
 		}
 
-		let ret = int_status.is_set(Interrupts::FRAMERX) && receive_status.is_set(RecieveStatus::FRAMERX);
+		let ret =
+			int_status.is_set(Interrupts::FRAMERX) && receive_status.is_set(RecieveStatus::FRAMERX);
 
 		if ret {
 			unsafe {
-				(*self.gem).int_status.modify_no_read(int_status, Interrupts::FRAMERX::SET);
-				(*self.gem).receive_status.modify_no_read(receive_status, RecieveStatus::FRAMERX::SET);
+				(*self.gem)
+					.int_status
+					.modify_no_read(int_status, Interrupts::FRAMERX::SET);
+				(*self.gem)
+					.receive_status
+					.modify_no_read(receive_status, RecieveStatus::FRAMERX::SET);
 			}
 
 			// handle incoming packets
@@ -428,13 +432,13 @@ impl NetworkInterface for GEMDriver {
 
 impl GEMDriver {
 	/// Returns the index of the next recieved frame
-	fn next_rx_index(&self) -> Option<u32>{
+	fn next_rx_index(&self) -> Option<u32> {
 		// Scan the buffer descriptor queue starting from rx_count
 
 		for i in 0..RX_BUF_NUM {
 			let index = (i + self.rx_counter) % RX_BUF_NUM;
-			let word0_addr = (self.rxbuffer_list + (index*8) as u64);
-			let word0_entry = unsafe {core::ptr::read_volatile(word0_addr.as_mut_ptr::<u32>())};
+			let word0_addr = (self.rxbuffer_list + (index * 8) as u64);
+			let word0_entry = unsafe { core::ptr::read_volatile(word0_addr.as_mut_ptr::<u32>()) };
 			// Is buffer owned by GEM?
 			if (word0_entry & 0x1) != 0 {
 				return Some(index);
@@ -452,7 +456,7 @@ impl Drop for GEMDriver {
 		// Software reset
 		// Clear the Network Control register
 		unsafe {
-        	(*self.gem).network_control.set(0x0);
+			(*self.gem).network_control.set(0x0);
 		}
 
 		crate::mm::deallocate(self.rxbuffer, (RX_BUF_LEN * RX_BUF_NUM) as usize);
@@ -463,38 +467,36 @@ impl Drop for GEMDriver {
 }
 
 pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDriver, DriverError> {
-	
-	debug!(
-		"Init GEM at {:p}",
-		gem_base
-	);
+	debug!("Init GEM at {:p}", gem_base);
 
 	let gem = gem_base.as_mut_ptr::<Registers>();
 
-    unsafe {
-        // Initialize the Controller
+	unsafe {
+		// Initialize the Controller
 
-        // Clear the Network Control register
-        (*gem).network_control.set(0x0);
-        // Clear the Statistics registers
-        (*gem).network_control.modify(NetworkControl::STATCLR::SET);
-        // Clear the status registers
-        (*gem).receive_status.set(0x0F);
-        (*gem).transmit_status.set(0x0F);
-        // Disable all interrupts
-        (*gem).int_disable.set(0x7FF_FEFF);
-        // Clear the buffer queues
-        (*gem).rx_qbar.set(0x0);
-        (*gem).tx_qbar.set(0x0);
+		// Clear the Network Control register
+		(*gem).network_control.set(0x0);
+		// Clear the Statistics registers
+		(*gem).network_control.modify(NetworkControl::STATCLR::SET);
+		// Clear the status registers
+		(*gem).receive_status.set(0x0F);
+		(*gem).transmit_status.set(0x0F);
+		// Disable all interrupts
+		(*gem).int_disable.set(0x7FF_FEFF);
+		// Clear the buffer queues
+		(*gem).rx_qbar.set(0x0);
+		(*gem).tx_qbar.set(0x0);
 
-        // Configure the Controller   
+		// Configure the Controller
 
-        // Enable Full Duplex
+		// Enable Full Duplex
 		(*gem).network_config.modify(NetworkConfig::FDEN::SET);
 		// Enable Gigabit mode
 		(*gem).network_config.modify(NetworkConfig::GIGEEN::SET);
 		// Enable reception of broadcast or multicast frames
-		(*gem).network_config.modify(NetworkConfig::BCASTDI::CLEAR + NetworkConfig::MCASTHASHEN::SET);
+		(*gem)
+			.network_config
+			.modify(NetworkConfig::BCASTDI::CLEAR + NetworkConfig::MCASTHASHEN::SET);
 		// Enable promiscuous mode
 		// (*GEM).network_config.modify(NetworkConfig::COPYALLEN::SET);
 		// Enable TCP/IP checksum offload feature on receive
@@ -503,7 +505,9 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		(*gem).network_config.modify(NetworkConfig::PAUSEEN::SET);
 		// Set the MDC clock divisor
 		//(CLK_DIV64 for up to 160 Mhz) TODO: Determine the correct value
-		(*gem).network_config.modify(NetworkConfig::MDCCLKDIV::CLK_DIV64);
+		(*gem)
+			.network_config
+			.modify(NetworkConfig::MDCCLKDIV::CLK_DIV64);
 		// Enable FCS remove
 		(*gem).network_config.modify(NetworkConfig::FCSREM::SET);
 
@@ -514,9 +518,13 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		// Program the DMA configuration register
 
 		// Set the receive buffer size (TODO: Jumbo packet support)
-		(*gem).dma_config.modify(DMAConfig::RXBUF.val(RX_BUF_LEN/RX_BUFFER_MULTIPLE));
+		(*gem)
+			.dma_config
+			.modify(DMAConfig::RXBUF.val(RX_BUF_LEN / RX_BUFFER_MULTIPLE));
 		// Set the receiver packet buffer memory size to the full configured addressable space
-		(*gem).dma_config.modify(DMAConfig::RXSIZE::FULL_DDRESSABLE_SPACE);
+		(*gem)
+			.dma_config
+			.modify(DMAConfig::RXSIZE::FULL_DDRESSABLE_SPACE);
 		// Set the transmitter packet buffer memory size to the full configured addressable space
 		(*gem).dma_config.modify(DMAConfig::TXSIZE::SET);
 		// Enable TCP/IP checksum generation offload on the transmitter
@@ -529,7 +537,9 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		// Program the Network Control Register
 
 		// Enable MDIO and enable transmitter/receiver
-		(*gem).network_control.modify(NetworkControl::MDEN::SET + NetworkControl::TXEN::SET + NetworkControl::RXEN::SET);
+		(*gem).network_control.modify(
+			NetworkControl::MDEN::SET + NetworkControl::TXEN::SET + NetworkControl::RXEN::SET,
+		);
 
 		// PHY Initialization
 
@@ -558,17 +568,23 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		// Chck for auto-negotiation ability
 		if (phy_status & PhyStatus::ANCapMask as u16) == 0 {
 			warn!("PHY does not support auto-negotiation");
-			// TODO
-			//return Err(DriverError::InitGEMDevFail(GEMError::NoPhyFound));
-		}
-		else {
+		// TODO
+		//return Err(DriverError::InitGEMDevFail(GEMError::NoPhyFound));
+		} else {
 			// Keep default values in Auto-Negotiation advertisement register
 			// Enable AN
 			let phy_control = phy_read(gem, phy_addr, PhyReg::Control);
-			phy_write(gem, phy_addr, PhyReg::Control, PhyControl::ANEnableMask as u16 | phy_control);
-			
+			phy_write(
+				gem,
+				phy_addr,
+				PhyReg::Control,
+				PhyControl::ANEnableMask as u16 | phy_control,
+			);
+
 			// Wait for AN to complete
-			while (phy_read(gem, phy_addr, PhyReg::Status) | PhyStatus::ANCompleteMask as u16) == 0 {};
+			while (phy_read(gem, phy_addr, PhyReg::Status) | PhyStatus::ANCompleteMask as u16) == 0
+			{
+			}
 
 			// Read partner ability register
 			let partner_ability = phy_read(gem, phy_addr, PhyReg::ANLinkPartnerAbility);
@@ -577,7 +593,10 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 			// TODO - Next Page does not seem to be emulated by QEMU
 
 			//info!("PHY auto-negotiation completed:\n Speed: {}\nDuplex", ,);
-			debug!("PHY auto-negotiation completed: Partner Ability {:x}", partner_ability);
+			debug!(
+				"PHY auto-negotiation completed: Partner Ability {:x}",
+				partner_ability
+			);
 		}
 	}
 
@@ -592,7 +611,11 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 	// Allocate Transmit Buffer Descriptor List
 	let txbuffer_list = crate::mm::allocate((8 * TX_BUF_NUM) as usize, true);
 
-	if txbuffer.is_zero() || rxbuffer.is_zero() || rxbuffer_list.is_zero() || txbuffer_list.is_zero(){
+	if txbuffer.is_zero()
+		|| rxbuffer.is_zero()
+		|| rxbuffer_list.is_zero()
+		|| txbuffer_list.is_zero()
+	{
 		error!("Unable to allocate buffers for GEM");
 		return Err(DriverError::InitGEMDevFail(GEMError::Unknown));
 	}
@@ -605,8 +628,8 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 	unsafe {
 		// Init Receive Buffer Descriptor List
 		for i in 0..RX_BUF_NUM {
-			let word0 = (rxbuffer_list + (i*8) as u64).as_mut_ptr::<u32>();
-			let buffer = virt_to_phys(rxbuffer + (i*RX_BUF_LEN) as u64);
+			let word0 = (rxbuffer_list + (i * 8) as u64).as_mut_ptr::<u32>();
+			let buffer = virt_to_phys(rxbuffer + (i * RX_BUF_LEN) as u64);
 			if (buffer.as_u64() & 0b11) != 0 {
 				error!("Wrong buffer alignment");
 				return Err(DriverError::InitGEMDevFail(GEMError::Unknown));
@@ -623,17 +646,14 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		}
 
 		let rx_qbar: u32 = virt_to_phys(rxbuffer_list).as_u64().try_into().unwrap();
-		debug!(
-			"Set rx_qbar to {:x}",
-			rx_qbar
-		);
+		debug!("Set rx_qbar to {:x}", rx_qbar);
 		(*gem).rx_qbar.set(rx_qbar);
 
 		// Init Transmit Buffer Descriptor List
 		for i in 0..TX_BUF_NUM {
-			let word0 = (txbuffer_list + (i*8) as u64).as_mut_ptr::<u32>();
-			let word1 = (txbuffer_list + (i*8 + 4) as u64).as_mut_ptr::<u32>();
-			let buffer = virt_to_phys(txbuffer + (i*TX_BUF_LEN) as u64);
+			let word0 = (txbuffer_list + (i * 8) as u64).as_mut_ptr::<u32>();
+			let word1 = (txbuffer_list + (i * 8 + 4) as u64).as_mut_ptr::<u32>();
+			let buffer = virt_to_phys(txbuffer + (i * TX_BUF_LEN) as u64);
 
 			// This can fail if address of buffers is > 32 bit
 			// TODO: 64-bit addresses
@@ -648,35 +668,26 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		}
 
 		let tx_qbar: u32 = virt_to_phys(txbuffer_list).as_u64().try_into().unwrap();
-		debug!(
-			"Set tx_qbar to {:x}",
-			tx_qbar
-		);
+		debug!("Set tx_qbar to {:x}", tx_qbar);
 		(*gem).tx_qbar.set(tx_qbar);
 
 		// Configure Interrupts
-		debug!("Install interrupt handler for GEM at {:x}", network_irqhandler as usize);
+		debug!(
+			"Install interrupt handler for GEM at {:x}",
+			network_irqhandler as usize
+		);
 		irq_install_handler(irq, network_irqhandler as usize);
 		(*gem).int_enable.write(Interrupts::FRAMERX::SET); // + Interrupts::TXCOMPL::SET
-		
+
 		// Enable the Controller (again?)
 		// Enable the transmitter
 		(*gem).network_control.modify(NetworkControl::TXEN::SET);
 		// Enable the receiver
 		(*gem).network_control.modify(NetworkControl::RXEN::SET);
-    }
+	}
 
 	// 5e:bf:26:5f:cc:14
-	let mac: [u8; 6] = unsafe {
-		[
-			0x5e,
-			0xbf,
-			0x26,
-			0x5f,
-			0xcc,
-			0x14,
-		]
-	};
+	let mac: [u8; 6] = unsafe { [0x5e, 0xbf, 0x26, 0x5f, 0xcc, 0x14] };
 
 	debug!(
 		"MAC address {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
@@ -694,7 +705,7 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		tx_counter: 0,
 		txbuffer: txbuffer,
 		txbuffer_list: txbuffer_list,
-		tx_len: [0;TX_BUF_NUM as usize],
+		tx_len: [0; TX_BUF_NUM as usize],
 	})
 }
 
@@ -702,7 +713,13 @@ unsafe fn phy_read(gem: *mut Registers, addr: u32, reg: PhyReg) -> u16 {
 	// Check that no MDIO operation in progress
 	wait_for_mdio(gem);
 	// Initiate the data shift operation over MDIO
-	(*gem).phy_maintenance.write(PHYMaintenance::CLAUSE_22::SET + PHYMaintenance::OP::READ + PHYMaintenance::ADDR.val(addr) + PHYMaintenance::REG.val(reg as u32) + PHYMaintenance::MUST_10::MUST_BE_10);
+	(*gem).phy_maintenance.write(
+		PHYMaintenance::CLAUSE_22::SET
+			+ PHYMaintenance::OP::READ
+			+ PHYMaintenance::ADDR.val(addr)
+			+ PHYMaintenance::REG.val(reg as u32)
+			+ PHYMaintenance::MUST_10::MUST_BE_10,
+	);
 	wait_for_mdio(gem);
 	(*gem).phy_maintenance.read(PHYMaintenance::DATA) as u16
 }
@@ -711,12 +728,18 @@ unsafe fn phy_write(gem: *mut Registers, addr: u32, reg: PhyReg, data: u16) {
 	// Check that no MDIO operation in progress
 	wait_for_mdio(gem);
 	// Initiate the data shift operation over MDIO
-	(*gem).phy_maintenance.write(PHYMaintenance::CLAUSE_22::SET + PHYMaintenance::OP::WRITE + PHYMaintenance::ADDR.val(addr) + PHYMaintenance::REG.val(reg as u32) + PHYMaintenance::MUST_10::MUST_BE_10 + PHYMaintenance::DATA.val(data as u32));
+	(*gem).phy_maintenance.write(
+		PHYMaintenance::CLAUSE_22::SET
+			+ PHYMaintenance::OP::WRITE
+			+ PHYMaintenance::ADDR.val(addr)
+			+ PHYMaintenance::REG.val(reg as u32)
+			+ PHYMaintenance::MUST_10::MUST_BE_10
+			+ PHYMaintenance::DATA.val(data as u32),
+	);
 	wait_for_mdio(gem);
 }
 
-
 unsafe fn wait_for_mdio(gem: *mut Registers) {
 	// Check that no MDIO operation in progress
-	while !(*gem).network_status.is_set(NetworkStatus::PHY_MGMT_IDLE){};
+	while !(*gem).network_status.is_set(NetworkStatus::PHY_MGMT_IDLE) {}
 }

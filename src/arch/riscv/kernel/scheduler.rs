@@ -93,7 +93,7 @@ pub struct State {
 	x30: usize,
 	/// x31 register
 	x31: usize,
-	
+
 	/// f0 register
 	f0: u64,
 	/// f1 register
@@ -197,7 +197,7 @@ impl TaskStacks {
 		};
 		let total_size = user_stack_size + DEFAULT_STACK_SIZE + KERNEL_STACK_SIZE;
 		let virt_addr = crate::arch::mm::virtualmem::allocate(total_size + 4 * BasePageSize::SIZE)
-		//let virt_addr = crate::arch::mm::virtualmem::allocate(total_size)
+			//let virt_addr = crate::arch::mm::virtualmem::allocate(total_size)
 			.expect("Failed to allocate Virtual Memory for TaskStacks");
 		let phys_addr = crate::arch::mm::physicalmem::allocate(total_size)
 			.expect("Failed to allocate Physical Memory for TaskStacks");
@@ -242,7 +242,7 @@ impl TaskStacks {
 		unsafe {
 			ptr::write_bytes(
 				(virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE + 3 * BasePageSize::SIZE)
-				//(virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE)
+					//(virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE)
 					.as_mut_ptr::<u8>(),
 				0xAC,
 				user_stack_size,
@@ -368,15 +368,15 @@ impl TaskTLS {
 		let tdata_size: usize = environment::get_tls_filesz();
 		// Yes, it does, so we have to allocate TLS memory.
 		// Allocate enough space for the given size and one more variable of type usize, which holds the tls_pointer.
-		let tls_allocation_size = align_up!(tls_size, 32);// + mem::size_of::<usize>();
-		// We allocate in 128 byte granularity (= cache line size) to avoid false sharing
+		let tls_allocation_size = align_up!(tls_size, 32); // + mem::size_of::<usize>();
+												   // We allocate in 128 byte granularity (= cache line size) to avoid false sharing
 		let memory_size = align_up!(tls_allocation_size, 128);
 		let layout =
 			Layout::from_size_align(memory_size, 128).expect("TLS has an invalid size / alignment");
 		let ptr = VirtAddr(unsafe { alloc(layout) as u64 });
 
 		// The tls_pointer is the address to the end of the TLS area requested by the task.
-		let tls_pointer = ptr;// + align_up!(tls_size, 32);
+		let tls_pointer = ptr; // + align_up!(tls_size, 32);
 
 		unsafe {
 			// Copy over TLS variables with their initial values.
@@ -483,7 +483,6 @@ extern "C" fn task_entry(func: extern "C" fn(usize), arg: usize) {
 
 	// Exit task
 	core_scheduler().exit(0)
-
 }
 
 impl TaskFrame for Task {

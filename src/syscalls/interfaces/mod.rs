@@ -13,10 +13,10 @@ use core::convert::{TryFrom, TryInto};
 use core::{isize, ptr, slice, str};
 
 use crate::arch;
-#[cfg(all(feature = "pci", not(target_arch = "riscv64")))]
-use crate::arch::kernel::pci::get_network_driver;
 #[cfg(target_arch = "riscv64")]
 use crate::arch::kernel::mmio::get_network_driver;
+#[cfg(all(feature = "pci", not(target_arch = "riscv64")))]
+use crate::arch::kernel::pci::get_network_driver;
 use crate::console::CONSOLE;
 use crate::environment;
 use crate::errno::*;

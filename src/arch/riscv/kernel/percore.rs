@@ -5,9 +5,9 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+use crate::arch::riscv::kernel::BOOT_INFO;
 use crate::scheduler::{CoreId, PerCoreScheduler};
 use core::ptr;
-use crate::arch::riscv::kernel::BOOT_INFO;
 
 #[no_mangle]
 pub static mut PERCORE: PerCoreVariables = PerCoreVariables::new(0);
@@ -59,12 +59,10 @@ impl PerCoreVariable {
 // Treat all per-core variables as 64-bit variables by default. This is true for u64, usize, pointers.
 // Implement the PerCoreVariableMethods trait functions using 64-bit memory moves.
 // The functions are implemented as default functions, which can be overriden in specialized implementations of the trait.
-impl PerCoreVariableMethods for PerCoreVariable
-{
+impl PerCoreVariableMethods for PerCoreVariable {
 	#[inline]
 	#[cfg(feature = "smp")]
-	default unsafe fn get(&self) -> usize
-	{
+	default unsafe fn get(&self) -> usize {
 		let mut value: usize;
 		let mut offset = self.offset();
 		//llvm_asm!("movq %gs:($1), $0" : "=r"(value) : "r"(self.offset()) :: "volatile");
@@ -79,7 +77,7 @@ impl PerCoreVariableMethods for PerCoreVariable
 
 	#[inline]
 	#[cfg(not(feature = "smp"))]
-	default unsafe fn get(&self) -> usize{
+	default unsafe fn get(&self) -> usize {
 		self.data
 	}
 
@@ -105,7 +103,7 @@ impl PerCoreVariableMethods for PerCoreVariable
 
 #[inline]
 pub fn core_id() -> CoreId {
-	unsafe { PERCORE.core_id.get() as u32}
+	unsafe { PERCORE.core_id.get() as u32 }
 }
 
 #[inline]
@@ -122,7 +120,7 @@ pub fn set_core_scheduler(scheduler: *mut PerCoreScheduler) {
 
 #[inline(always)]
 pub fn get_kernel_stack() -> u64 {
-	unsafe { PERCORE.kernel_stack.get() as u64}
+	unsafe { PERCORE.kernel_stack.get() as u64 }
 }
 
 #[inline]
@@ -137,8 +135,6 @@ pub fn init() {
 		if address == 0 {
 			address = &PERCORE as *const _ as u64;
 		}
-		
-		
 
 		asm!(
 			"mv gp, {address}",

@@ -7,13 +7,13 @@
 
 use core::sync::atomic::spin_loop_hint;
 
-use riscv::asm::wfi;
 use crate::arch::riscv::kernel::sbi;
-use riscv::register::{time, sie};
-use crate::arch::riscv::kernel::{get_timebase_freq, is_uhyve};
 use crate::arch::riscv::kernel::HARTS_AVAILABLE;
-use core::convert::TryInto;
+use crate::arch::riscv::kernel::{get_timebase_freq, is_uhyve};
 use crate::scheduler::CoreId;
+use core::convert::TryInto;
+use riscv::asm::wfi;
+use riscv::register::{sie, time};
 
 /// Only a dummy implementation. The state of the floating point registers are already saved/restored on context switch
 pub struct FPUState {
@@ -25,13 +25,9 @@ impl FPUState {
 		Self {}
 	}
 
-	pub fn restore(&self) {
-		
-	}
+	pub fn restore(&self) {}
 
-	pub fn save(&self) {
-		
-	}
+	pub fn save(&self) {}
 }
 
 pub fn generate_random_number32() -> Option<u32> {
@@ -50,7 +46,7 @@ pub fn run_on_hypervisor() -> bool {
 #[inline(always)]
 pub fn msb(value: u64) -> Option<u64> {
 	if value > 0 {
-		let ret: u64 = 63-value.leading_zeros() as u64;
+		let ret: u64 = 63 - value.leading_zeros() as u64;
 		Some(ret)
 	} else {
 		None
@@ -89,7 +85,7 @@ pub fn get_timer_ticks() -> u64 {
 }
 
 pub fn get_frequency() -> u16 {
-	(get_timebase_freq()/1000000).try_into().unwrap()
+	(get_timebase_freq() / 1000000).try_into().unwrap()
 }
 
 #[inline]
@@ -113,14 +109,13 @@ pub fn udelay(usecs: u64) {
 pub fn set_oneshot_timer(wakeup_time: Option<u64>) {
 	if let Some(wt) = wakeup_time {
 		debug!("Starting Timer: {:x}", get_timestamp());
-		unsafe{
+		unsafe {
 			sie::set_stimer();
 		}
 		let next_time = wt * u64::from(get_frequency());
-		
+
 		sbi::set_timer(next_time);
-	}
-	else{
+	} else {
 		// Disable the Timer (and clear a pending interrupt)
 		debug!("Stopping Timer");
 		sbi::set_timer(u64::MAX);
@@ -128,9 +123,7 @@ pub fn set_oneshot_timer(wakeup_time: Option<u64>) {
 }
 
 pub fn wakeup_core(core_to_wakeup: CoreId) {
-	let hart_id =  unsafe{
-		HARTS_AVAILABLE[core_to_wakeup as usize]
-	};
+	let hart_id = unsafe { HARTS_AVAILABLE[core_to_wakeup as usize] };
 	debug!("Wakeup core: {} , hart_id: {}", core_to_wakeup, hart_id);
 	sbi::send_ipi(1 << hart_id);
 }

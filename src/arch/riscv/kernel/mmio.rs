@@ -1,11 +1,11 @@
 use crate::drivers::net::gem::{self, GEMDriver};
+use crate::drivers::net::NetworkInterface;
 use crate::synch::spinlock::SpinlockIrqSave;
 use alloc::vec::Vec;
-use crate::drivers::net::NetworkInterface;
 // use crate::drivers::net::virtio_net::VirtioNetDriver;
 
-use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
 use crate::arch::riscv::mm::paging;
+use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
 
 static mut MMIO_DRIVERS: Vec<MmioDriver> = Vec::new();
 
@@ -39,7 +39,7 @@ pub fn get_network_driver() -> Option<&'static SpinlockIrqSave<dyn NetworkInterf
 	unsafe { MMIO_DRIVERS.iter().find_map(|drv| drv.get_network_driver()) }
 }
 
-// pub fn init_drivers() { 
+// pub fn init_drivers() {
 //     //Identitiy map GEM
 //     paging::identity_map::<paging::HugePageSize>(PhysAddr(0x1009_0000), PhysAddr(0x1009_1FFF));
 //     match gem::init_device() {

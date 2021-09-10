@@ -5,10 +5,10 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use crate::arch::riscv::kernel::serial::SerialPort;
-use crate::arch::riscv::kernel::{BootInfo, BOOT_INFO, BOOTINFO_MAGIC_NUMBER};
-use crate::KERNEL_STACK_SIZE;
 use crate::arch::riscv::kernel::processor;
+use crate::arch::riscv::kernel::serial::SerialPort;
+use crate::arch::riscv::kernel::{BootInfo, BOOTINFO_MAGIC_NUMBER, BOOT_INFO};
+use crate::KERNEL_STACK_SIZE;
 
 //static mut BOOT_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
 
@@ -38,10 +38,7 @@ unsafe fn pre_init(hart_id: usize, boot_info: &'static mut BootInfo) -> ! {
 	// info!("Welcome to hermit kernel.");
 	assert_eq!(boot_info.magic_number, BOOTINFO_MAGIC_NUMBER);
 
-	core::ptr::write_volatile(
-		&mut (*BOOT_INFO).current_boot_id,
-		hart_id as u32,
-	);
+	core::ptr::write_volatile(&mut (*BOOT_INFO).current_boot_id, hart_id as u32);
 
 	// trace!("BOOT_INFO address: {:p}", BOOT_INFO);
 

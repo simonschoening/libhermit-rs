@@ -18,10 +18,10 @@ pub mod gem;
 use crate::arch::kernel::apic;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::kernel::irq::ExceptionStackFrame;
-#[cfg(all(feature = "pci", not(target_arch = "riscv64")))]
-use crate::arch::kernel::pci::get_network_driver;
 #[cfg(target_arch = "riscv64")]
 use crate::arch::kernel::mmio::get_network_driver;
+#[cfg(all(feature = "pci", not(target_arch = "riscv64")))]
+use crate::arch::kernel::pci::get_network_driver;
 use crate::arch::kernel::percore::*;
 use crate::scheduler::task::TaskHandle;
 use crate::synch::semaphore::*;
@@ -101,7 +101,7 @@ pub extern "x86-interrupt" fn network_irqhandler(_stack_frame: ExceptionStackFra
 			false
 		}
 	};
-	
+
 	#[cfg(not(feature = "pci"))]
 	let check_scheduler = false;
 
@@ -115,8 +115,7 @@ pub fn network_irqhandler() {
 	debug!("Receive network interrupt");
 
 	let check_scheduler = match get_network_driver() {
-		Some(driver) => {driver.lock().handle_interrupt()
-		},
+		Some(driver) => driver.lock().handle_interrupt(),
 		_ => {
 			debug!("Unable to handle interrupt!");
 			false

@@ -363,7 +363,6 @@ fn boot_processor_main() -> ! {
 		arch::boot_application_processors();
 	}
 
-
 	#[cfg(feature = "smp")]
 	synch_all_cores();
 
@@ -379,7 +378,7 @@ fn boot_processor_main() -> ! {
 	// Start the initd task.
 	scheduler::PerCoreScheduler::spawn(initd, 0, scheduler::task::NORMAL_PRIO, 0, USER_STACK_SIZE);
 	let core_scheduler = core_scheduler();
-	
+
 	trace!("core_scheduler: {:p}", &core_scheduler);
 
 	// Run the scheduler loop.

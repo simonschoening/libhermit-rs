@@ -5,8 +5,8 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use crate::environment;
 use crate::arch::riscv::kernel::BOOT_INFO;
+use crate::environment;
 
 pub fn get_boot_time() -> u64 {
 	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).boot_gtod) }

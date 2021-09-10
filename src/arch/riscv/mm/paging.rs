@@ -6,11 +6,11 @@
 // copied, modified, or distributed except according to those terms.
 
 use core::marker::PhantomData;
-use core::{fmt, ptr, usize, mem};
+use core::{fmt, mem, ptr, usize};
 
+use crate::arch::riscv::kernel::get_mem_base;
 use crate::arch::riscv::kernel::percore::*;
 use crate::arch::riscv::kernel::processor;
-use crate::arch::riscv::kernel::get_mem_base;
 use crate::arch::riscv::mm::physicalmem;
 use crate::arch::riscv::mm::virtualmem;
 use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
@@ -110,10 +110,10 @@ impl PageTableEntry {
 	/// Return the stored physical address.
 	pub fn address(&self) -> PhysAddr {
 		PhysAddr(
-			(self.physical_address_and_flags.as_u64()
-				& !(0x3FFu64)
+			(
+				self.physical_address_and_flags.as_u64() & !(0x3FFu64)
 				//& !(0x3FFu64 << 54)
-			) << 2
+			) << 2,
 		)
 	}
 
@@ -163,7 +163,8 @@ impl PageTableEntry {
 		flags_to_set.insert(PageTableEntryFlags::ACCESSED);
 		flags_to_set.insert(PageTableEntryFlags::DIRTY);
 		//debug!("(physical_address.as_u64(): {:#X}", physical_address.as_u64());
-		self.physical_address_and_flags = PhysAddr((physical_address.as_u64() >> 2) | flags_to_set.bits());
+		self.physical_address_and_flags =
+			PhysAddr((physical_address.as_u64() >> 2) | flags_to_set.bits());
 	}
 }
 
@@ -240,8 +241,7 @@ impl<S: PageSize> Page<S> {
 		//virtual_address < VirtAddr(1u64 << 39)
 		if virtual_address.as_u64() & (1 << 38) != 0 {
 			return virtual_address.as_u64() >> 39 == (1 << (64 - 39)) - 1;
-		}
-		else{
+		} else {
 			return virtual_address.as_u64() >> 39 == 0;
 		}
 	}
@@ -369,15 +369,12 @@ trait PageTableMethods {
 	);
 }
 
-impl<L: PageTableLevel> PageTable<L>
-{
+impl<L: PageTableLevel> PageTable<L> {
 	const fn new() -> Self {
 		PageTable {
-			entries: [
-			PageTableEntry {
+			entries: [PageTableEntry {
 				physical_address_and_flags: PhysAddr::zero(),
-			};
-			1 << PAGE_MAP_BITS],
+			}; 1 << PAGE_MAP_BITS],
 			level: PhantomData,
 		}
 	}
@@ -568,7 +565,7 @@ pub fn get_page_table_entry<S: PageSize>(virtual_address: VirtAddr) -> Option<Pa
 	/* let root_pagetable = unsafe {
 		&mut *mem::transmute::<*mut u64, *mut PageTable<L2Table>>(L2TABLE_ADDRESS.as_mut_ptr())
 	}; */
-	unsafe{ ROOT_PAGETABLE.get_page_table_entry(page)}
+	unsafe { ROOT_PAGETABLE.get_page_table_entry(page) }
 }
 
 pub fn get_physical_address<S: PageSize>(virtual_address: VirtAddr) -> PhysAddr {
@@ -619,39 +616,52 @@ pub fn virtual_to_physical(virtual_address: VirtAddr) -> PhysAddr {
 	} */
 	let mut vpn: [u64; PAGE_LEVELS] = [0; PAGE_LEVELS];
 
-	for i in (0..PAGE_LEVELS){
-		vpn[i] = (virtual_address >> (PAGE_BITS + i*PAGE_MAP_BITS)) & PAGE_MAP_MASK as u64;
-		debug!("i: {}, vpn[i]: {:#X}, {:#X}", i , vpn[i], virtual_address >> (PAGE_BITS + i*PAGE_MAP_BITS));
+	for i in (0..PAGE_LEVELS) {
+		vpn[i] = (virtual_address >> (PAGE_BITS + i * PAGE_MAP_BITS)) & PAGE_MAP_MASK as u64;
+		debug!(
+			"i: {}, vpn[i]: {:#X}, {:#X}",
+			i,
+			vpn[i],
+			virtual_address >> (PAGE_BITS + i * PAGE_MAP_BITS)
+		);
 	}
 
-	let mut page_table_addr = unsafe{ &ROOT_PAGETABLE as *const PageTable<L2Table>};
+	let mut page_table_addr = unsafe { &ROOT_PAGETABLE as *const PageTable<L2Table> };
 	for i in (0..PAGE_LEVELS).rev() {
-		let pte = unsafe{(*page_table_addr).entries[(vpn[i]) as usize]};
-		debug!("PTE: {:?} , i: {}, vpn[i]: {:#X}", pte, i , vpn[i]);
-		//Translation would raise a page-fault exception 
-		assert!(pte.is_present() && !(!pte.is_readable() && pte.is_writable()), "Invalid PTE: {:?}", pte);
+		let pte = unsafe { (*page_table_addr).entries[(vpn[i]) as usize] };
+		debug!("PTE: {:?} , i: {}, vpn[i]: {:#X}", pte, i, vpn[i]);
+		//Translation would raise a page-fault exception
+		assert!(
+			pte.is_present() && !(!pte.is_readable() && pte.is_writable()),
+			"Invalid PTE: {:?}",
+			pte
+		);
 
 		if pte.is_executable() || pte.is_readable() {
 			//PTE is a leaf
 			debug!("PTE is a leaf");
-			let mut phys_address = virtual_address.as_u64() & ((1<<PAGE_BITS) - 1);
+			let mut phys_address = virtual_address.as_u64() & ((1 << PAGE_BITS) - 1);
 			for j in 0..i {
-				phys_address = phys_address | (vpn[j]) << (PAGE_BITS + j*PAGE_MAP_BITS);
+				phys_address = phys_address | (vpn[j]) << (PAGE_BITS + j * PAGE_MAP_BITS);
 			}
 			let ppn = pte.address().as_u64();
 			for j in i..PAGE_LEVELS {
-				debug!("ppn: {:#X}, {:#X}", ppn, ppn & (PAGE_MAP_MASK << (PAGE_BITS + j*PAGE_MAP_BITS)) as u64);
-				phys_address = phys_address | (ppn & (PAGE_MAP_MASK << (PAGE_BITS + j*PAGE_MAP_BITS)) as u64);
+				debug!(
+					"ppn: {:#X}, {:#X}",
+					ppn,
+					ppn & (PAGE_MAP_MASK << (PAGE_BITS + j * PAGE_MAP_BITS)) as u64
+				);
+				phys_address = phys_address
+					| (ppn & (PAGE_MAP_MASK << (PAGE_BITS + j * PAGE_MAP_BITS)) as u64);
 			}
 			return PhysAddr(phys_address);
-		}
-		else {
+		} else {
 			//PTE is a pointer to the next level of the page table
 			assert!(i != 0); //pte should be a leaf if i=0
 			page_table_addr = pte.address().as_usize() as *mut PageTable<L2Table>;
 			debug!("PTE is pointer: {:?}", page_table_addr);
 		}
-	} 
+	}
 	panic!("virtual_to_physical should never reach this point");
 }
 
@@ -674,7 +684,9 @@ pub fn map<S: PageSize>(
 	);
 
 	let range = get_page_range::<S>(virtual_address, count);
-	unsafe{ROOT_PAGETABLE.map_pages(range, physical_address, flags);}
+	unsafe {
+		ROOT_PAGETABLE.map_pages(range, physical_address, flags);
+	}
 
 	//assert_eq!(virtual_address.as_u64(), physical_address.as_u64(), "Paging not implemented");
 }
@@ -690,7 +702,9 @@ pub fn unmap<S: PageSize>(virtual_address: VirtAddr, count: usize) {
 	/* let root_pagetable = unsafe {
 		&mut *mem::transmute::<*mut u64, *mut PageTable<L2Table>>(L2TABLE_ADDRESS.as_mut_ptr())
 	}; */
-	unsafe{ROOT_PAGETABLE.map_pages(range, PhysAddr::zero(), PageTableEntryFlags::BLANK);}
+	unsafe {
+		ROOT_PAGETABLE.map_pages(range, PhysAddr::zero(), PageTableEntryFlags::BLANK);
+	}
 }
 
 #[inline]
@@ -701,7 +715,7 @@ pub fn get_application_page_size() -> usize {
 pub fn identity_map<S: PageSize>(start_address: PhysAddr, end_address: PhysAddr) {
 	let first_page = Page::<S>::including_address(VirtAddr(start_address.as_u64()));
 	let last_page = Page::<S>::including_address(VirtAddr(end_address.as_u64()));
-	
+
 	trace!(
 		"identity_map address {:#X} to address {:#X}",
 		first_page.virtual_address,
@@ -720,14 +734,19 @@ pub fn identity_map<S: PageSize>(start_address: PhysAddr, end_address: PhysAddr)
 	let range = Page::<S>::range(first_page, last_page);
 	let mut flags = PageTableEntryFlags::empty();
 	flags.normal().writable();
-	unsafe{ROOT_PAGETABLE.map_pages(range, PhysAddr(first_page.address().as_u64()), flags);}
+	unsafe {
+		ROOT_PAGETABLE.map_pages(range, PhysAddr(first_page.address().as_u64()), flags);
+	}
 }
 
 pub fn init_page_tables() {
 	debug!("Identity map the physical memory using HugePages");
-	
-	unsafe{
-		identity_map::<HugePageSize>(get_mem_base(), get_mem_base() + PhysAddr(physicalmem::total_memory_size() as u64 - 1));
+
+	unsafe {
+		identity_map::<HugePageSize>(
+			get_mem_base(),
+			get_mem_base() + PhysAddr(physicalmem::total_memory_size() as u64 - 1),
+		);
 
 		sfence_vma(0, 0);
 
@@ -737,7 +756,7 @@ pub fn init_page_tables() {
 
 pub fn init_application_processor() {
 	//debug!("Identity map the physical memory using HugePages");
-	unsafe{
+	unsafe {
 		sfence_vma(0, 0);
 		satp::write(0x8 << 60 | ((&ROOT_PAGETABLE as *const _ as usize) >> 12))
 	}

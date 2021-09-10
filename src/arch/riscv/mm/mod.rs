@@ -5,10 +5,10 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+pub mod addr;
 pub mod paging;
 pub mod physicalmem;
 pub mod virtualmem;
-pub mod addr;
 
 pub use addr::PhysAddr;
 pub use addr::VirtAddr;

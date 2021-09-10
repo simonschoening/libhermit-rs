@@ -18,10 +18,10 @@ use crate::arch::mm::VirtAddr;
 use crate::arch::x86_64::kernel::irq::{get_irq_name, IrqStatistics};
 use crate::arch::x86_64::kernel::percore::*;
 use crate::arch::x86_64::kernel::serial::SerialPort;
+use crate::arch::x86_64::mm::PhysAddr;
 use crate::environment;
 use crate::kernel_message_buffer;
 use crate::scheduler::CoreId;
-use crate::arch::x86_64::mm::{PhysAddr};
 
 #[cfg(feature = "acpi")]
 pub mod acpi;

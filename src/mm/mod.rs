@@ -15,7 +15,7 @@ use crate::arch;
 use crate::arch::mm::paging::{
 	BasePageSize, HugePageSize, LargePageSize, PageSize, PageTableEntryFlags,
 };
-use crate::arch::mm::physicalmem::{total_memory_size, get_mem_base};
+use crate::arch::mm::physicalmem::{get_mem_base, total_memory_size};
 #[cfg(feature = "newlib")]
 use crate::arch::mm::virtualmem::kernel_heap_end;
 use crate::arch::mm::{PhysAddr, VirtAddr};
@@ -107,7 +107,10 @@ pub fn init() {
 
 	//info!("reserved space {} KB", reserved_space >> 10);
 
-	if total_memory_size() < (kernel_end_address().as_usize() - get_mem_base().as_usize()) + reserved_space + LargePageSize::SIZE
+	if total_memory_size()
+		< (kernel_end_address().as_usize() - get_mem_base().as_usize())
+			+ reserved_space
+			+ LargePageSize::SIZE
 	{
 		panic!("No enough memory available!");
 	}
@@ -116,7 +119,9 @@ pub fn init() {
 	let mut map_size: usize;
 
 	let available_memory = align_down!(
-		total_memory_size() - (kernel_end_address().as_usize() - get_mem_base().as_usize()) - reserved_space,
+		total_memory_size()
+			- (kernel_end_address().as_usize() - get_mem_base().as_usize())
+			- reserved_space,
 		LargePageSize::SIZE
 	);
 

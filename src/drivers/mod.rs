@@ -13,7 +13,10 @@
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 // UNCOMMENTED FOR CORRECT USE STATEMENT; IS THIS CORRECT?
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-#[cfg(any(target_arch = "riscv64", all(feature = "pci", not(target_arch = "aarch64"))))]
+#[cfg(any(
+	target_arch = "riscv64",
+	all(feature = "pci", not(target_arch = "aarch64"))
+))]
 pub mod net;
 
 #[cfg(all(feature = "pci", not(target_arch = "aarch64")))]
@@ -24,12 +27,12 @@ pub mod virtio;
 /// passed on to higher layers.
 #[cfg(not(target_arch = "aarch64"))]
 pub mod error {
+	#[cfg(target_arch = "riscv64")]
+	use crate::drivers::net::gem::GEMError;
 	#[cfg(feature = "pci")]
 	use crate::drivers::net::rtl8139::RTL8139Error;
 	#[cfg(feature = "pci")]
 	use crate::drivers::virtio::error::VirtioError;
-	#[cfg(target_arch = "riscv64")]
-	use crate::drivers::net::gem::GEMError;
 	use core::fmt;
 
 	#[derive(Debug)]

@@ -6,37 +6,37 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+mod devicetree;
 pub mod irq;
 pub mod mmio;
 pub mod pci;
 pub mod percore;
 pub mod processor;
+mod sbi;
 pub mod scheduler;
 pub mod serial;
 mod start;
-mod sbi;
-mod devicetree;
 pub mod switch;
 pub mod systemtime;
 
 pub use crate::arch::riscv::kernel::devicetree::{get_mem_base, init_drivers};
 use crate::arch::riscv::kernel::percore::*;
-use crate::arch::riscv::kernel::serial::SerialPort;
 use crate::arch::riscv::kernel::processor::lsb;
+use crate::arch::riscv::kernel::serial::SerialPort;
 pub use crate::arch::riscv::kernel::systemtime::get_boot_time;
-use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
-use crate::arch::riscv::mm::physicalmem;
 use crate::arch::riscv::mm::paging;
-use hermit_dtb::Dtb;
+use crate::arch::riscv::mm::physicalmem;
+use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
 use crate::config::*;
 use crate::environment;
 use crate::kernel_message_buffer;
-use core::{intrinsics, ptr, mem};
-use core::fmt;
-use riscv::register::{sstatus, fcsr};
 use crate::scheduler::CoreId;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use core::fmt;
+use core::{intrinsics, mem, ptr};
+use hermit_dtb::Dtb;
+use riscv::register::{fcsr, sstatus};
 
 const SERIAL_PORT_BAUDRATE: u32 = 115200;
 const BOOTINFO_MAGIC_NUMBER: u32 = 0xC0DE_CAFEu32;
@@ -46,7 +46,6 @@ static mut COM1: SerialPort = SerialPort::new(0x9000000);
 // Used to store information about available harts. The index of the hart in the vector
 // represents its CpuId and does not need to match its hart_id
 pub static mut HARTS_AVAILABLE: Vec<usize> = Vec::new();
-
 
 #[repr(C)]
 struct BootInfo {
@@ -181,8 +180,8 @@ pub fn get_cmdline() -> VirtAddr {
 	VirtAddr(unsafe { core::ptr::read_volatile(&(*BOOT_INFO).cmdline) })
 }
 
-pub fn get_dtb_ptr() -> *const u8{
-	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).dtb_ptr) as *const u8}
+pub fn get_dtb_ptr() -> *const u8 {
+	unsafe { core::ptr::read_volatile(&(*BOOT_INFO).dtb_ptr) as *const u8 }
 }
 
 pub fn get_hart_mask() -> u64 {
@@ -242,7 +241,7 @@ pub fn boot_processor_init() {
 	environment::init();
 	irq::install();
 	//devicetree::init_drivers();
-	
+
 	/*processor::detect_features();
 	processor::configure();
 
@@ -324,7 +323,6 @@ extern "C" {
 	fn _start(hart_id: usize, boot_info: &'static mut BootInfo) -> !;
 }
 
-
 /// Application Processor initialization
 pub fn application_processor_init() {
 	percore::init();
@@ -335,10 +333,10 @@ pub fn application_processor_init() {
 }
 
 fn finish_processor_init() {
-	unsafe{
+	unsafe {
 		sstatus::set_fs(sstatus::FS::Initial);
 		//fcsr::clear_flags();
-        //fcsr::set_rounding_mode(fcsr::RoundingMode::RoundToNearestEven);
+		//fcsr::set_rounding_mode(fcsr::RoundingMode::RoundToNearestEven);
 
 		asm!(
 			"fmv.s.x	f0, zero",
@@ -377,7 +375,6 @@ fn finish_processor_init() {
 		);
 
 		sstatus::set_fs(sstatus::FS::Initial);
-		
 	}
 	info!("SSTATUS FS: {:?}", sstatus::read().fs());
 	info!("FCSR: {:?}", fcsr::read());
@@ -403,7 +400,10 @@ fn finish_processor_init() {
 	unsafe {
 		// Add hart to HARTS_AVAILABLE, the hart id is stored in current_boot_id
 		HARTS_AVAILABLE.push(current_hart_id);
-		info!("Initialized CPU with hart_id {}", HARTS_AVAILABLE[percore::core_id() as usize]);
+		info!(
+			"Initialized CPU with hart_id {}",
+			HARTS_AVAILABLE[percore::core_id() as usize]
+		);
 	}
 
 	crate::scheduler::add_current_core();
@@ -411,19 +411,20 @@ fn finish_processor_init() {
 	// Remove current hart from the hart_mask
 	let new_hart_mask = get_hart_mask() & (u64::MAX - (1 << current_hart_id));
 	unsafe {
-		core::ptr::write_volatile(
-			&mut (*BOOT_INFO).hart_mask,
-			new_hart_mask,
-		);
+		core::ptr::write_volatile(&mut (*BOOT_INFO).hart_mask, new_hart_mask);
 	}
 
 	let next_hart_index = lsb(new_hart_mask);
 
-	if let Some(next_hart_id) = next_hart_index{
+	if let Some(next_hart_id) = next_hart_index {
 		// The current processor already needs to prepare the processor variables for a possible next processor.
 		init_next_processor_variables(core_id() + 1);
 
-		info!("Starting CPU {} with hart_id {}", core_id() + 1, next_hart_id);
+		info!(
+			"Starting CPU {} with hart_id {}",
+			core_id() + 1,
+			next_hart_id
+		);
 
 		// Changing cpu_online will cause uhyve to start the next processor
 		unsafe {
@@ -431,12 +432,15 @@ fn finish_processor_init() {
 
 			//When running bare-metal/QEMU we use the firmware to start the next hart
 			if !is_uhyve() {
-				let ret = sbi::sbi_hart_start(next_hart_id as usize, _start as *const () as usize, BOOT_INFO as usize);
+				let ret = sbi::sbi_hart_start(
+					next_hart_id as usize,
+					_start as *const () as usize,
+					BOOT_INFO as usize,
+				);
 				info!("sbi_hart_start: {:?}", ret);
 			}
 		}
-	}
-	else {
+	} else {
 		info!("All processors are initialized");
 		unsafe {
 			let _ = intrinsics::atomic_xadd(&mut (*BOOT_INFO).cpu_online as *mut u32, 1);
@@ -455,7 +459,8 @@ pub fn print_statistics() {}
 pub fn init_next_processor_variables(core_id: CoreId) {
 	// Allocate stack and PerCoreVariables structure for the CPU and pass the addresses.
 	// Keep the stack executable to possibly support dynamically generated code on the stack (see https://security.stackexchange.com/a/47825).
-	let stack = physicalmem::allocate(KERNEL_STACK_SIZE).expect("Failed to allocate boot stack for new core");
+	let stack = physicalmem::allocate(KERNEL_STACK_SIZE)
+		.expect("Failed to allocate boot stack for new core");
 	let mut boxed_percore = Box::new(PerCoreVariables::new(core_id));
 	//let boxed_irq = Box::new(IrqStatistics::new());
 	//let boxed_irq_raw = Box::into_raw(boxed_irq);

@@ -8,9 +8,9 @@
 use core::{alloc::AllocError, convert::TryInto};
 
 use crate::arch::riscv::kernel::get_mem_base;
-use crate::arch::riscv::mm::paging::{HugePageSize, BasePageSize, PageSize};
-use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
+use crate::arch::riscv::mm::paging::{BasePageSize, HugePageSize, PageSize};
 use crate::arch::riscv::mm::physicalmem;
+use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
 use crate::mm;
 use crate::mm::freelist::{FreeList, FreeListEntry};
 use crate::synch::spinlock::SpinlockIrqSave;
@@ -27,7 +27,10 @@ const TASK_VIRTUAL_MEMORY_END: VirtAddr = VirtAddr(0x8000000000);
 
 pub fn init() {
 	let entry = FreeListEntry {
-		start: align_up!((get_mem_base() + PhysAddr(physicalmem::total_memory_size() as u64)).as_usize(), HugePageSize::SIZE),
+		start: align_up!(
+			(get_mem_base() + PhysAddr(physicalmem::total_memory_size() as u64)).as_usize(),
+			HugePageSize::SIZE
+		),
 		end: KERNEL_VIRTUAL_MEMORY_END.as_usize(),
 	};
 	KERNEL_FREE_LIST.lock().list.push_back(entry);

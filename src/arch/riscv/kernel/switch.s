@@ -211,7 +211,6 @@ switch_to_task_fp_dirty:
 	sd x1, (8*0)(sp)
 
 	//Store floating point registers 
-	//TODO: Save only when changed
 	fsd f0, (8*31)(sp)
 	fsd f1, (8*32)(sp)
 	fsd f2, (8*33)(sp)

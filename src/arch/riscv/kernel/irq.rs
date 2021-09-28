@@ -66,7 +66,7 @@ pub fn enable_and_wait() {
 			// debug!("sip: {:x?}", pending_interrupts);
 			#[cfg(feature = "smp")]
 			if pending_interrupts.ssoft() {
-				//Clear pending interrupts, maybe only the bit for Supervisor-level software interrupt should be cleared
+				//Clear Supervisor-level software interrupt
 				asm!(
 					"csrc sip, {ssoft_mask}",
 					ssoft_mask = in(reg) 0x2,
@@ -160,7 +160,7 @@ pub extern "C" fn trap_handler(tf: &mut TrapFrame) {
 	use self::scause::{Exception as E, Interrupt as I, Trap};
 	let scause = scause::read();
 	let stval = stval::read();
-	let sepc = sepc::read();
+	let sepc = tf.sepc;
 	trace!("Interrupt: {:?} ", scause.cause());
 	trace!("tf: {:x?} ", tf);
 	trace!("stvall: {:x}", stval);

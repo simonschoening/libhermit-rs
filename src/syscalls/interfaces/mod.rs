@@ -159,15 +159,15 @@ pub trait SyscallInterface: Send + Sync {
 	}
 
 	fn free_tx_buffer(&self, handle: usize) -> Result<(), ()> {
-		#[cfg(all(feature = "pci", not(target_arch = "aarch64")))]
-		match arch::kernel::pci::get_network_driver() {
+		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		match get_network_driver() {
 			Some(driver) => {
 				driver.lock().free_tx_buffer(handle);
 				Ok(())
 			}
 			_ => Err(()),
 		}
-		#[cfg(not(all(feature = "pci", not(target_arch = "aarch64"))))]
+		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
 		Err(())
 	}
 

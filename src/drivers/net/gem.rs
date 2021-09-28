@@ -250,6 +250,12 @@ impl NetworkInterface for GEMDriver {
 		Err(())
 	}
 
+	fn free_tx_buffer(&self, _token: usize) {
+		//Setting the length to zero indicates an unused/free buffer
+		//TODO
+		//self.tx_len[token] = 0;
+	}
+
 	fn send_tx_buffer(&mut self, id: usize, len: usize) -> Result<(), ()> {
 		debug!("send_tx_buffer");
 
@@ -370,6 +376,7 @@ impl NetworkInterface for GEMDriver {
 					.network_control
 					.modify(NetworkControl::TXEN::CLEAR);
 			}
+			//Setting the length to zero indicates an unused/free buffer
 			self.tx_len[0] = 0;
 		}
 
@@ -686,7 +693,7 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		(*gem).network_control.modify(NetworkControl::RXEN::SET);
 	}
 
-	// 5e:bf:26:5f:cc:14
+	// 5e:bf:26:5f:cc:14. TODO: Device tree
 	let mac: [u8; 6] = unsafe { [0x5e, 0xbf, 0x26, 0x5f, 0xcc, 0x14] };
 
 	debug!(
@@ -710,7 +717,7 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 }
 
 unsafe fn phy_read(gem: *mut Registers, addr: u32, reg: PhyReg) -> u16 {
-	// Check that no MDIO operation in progress
+	// Check that no MDIO operation is in progress
 	wait_for_mdio(gem);
 	// Initiate the data shift operation over MDIO
 	(*gem).phy_maintenance.write(
@@ -725,7 +732,7 @@ unsafe fn phy_read(gem: *mut Registers, addr: u32, reg: PhyReg) -> u16 {
 }
 
 unsafe fn phy_write(gem: *mut Registers, addr: u32, reg: PhyReg, data: u16) {
-	// Check that no MDIO operation in progress
+	// Check that no MDIO operation is in progress
 	wait_for_mdio(gem);
 	// Initiate the data shift operation over MDIO
 	(*gem).phy_maintenance.write(
@@ -740,6 +747,6 @@ unsafe fn phy_write(gem: *mut Registers, addr: u32, reg: PhyReg, data: u16) {
 }
 
 unsafe fn wait_for_mdio(gem: *mut Registers) {
-	// Check that no MDIO operation in progress
+	// Check that no MDIO operation is in progress
 	while !(*gem).network_status.is_set(NetworkStatus::PHY_MGMT_IDLE) {}
 }

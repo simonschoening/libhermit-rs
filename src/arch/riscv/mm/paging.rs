@@ -230,15 +230,14 @@ impl<S: PageSize> Page<S> {
 
 	/// Flushes this page from the TLB of this CPU.
 	fn flush_from_tlb(&self) {
-		//TODO: ASID?
 		unsafe {
 			sfence_vma(0, self.virtual_address.as_usize());
 		}
 	}
 
 	/// Returns whether the given virtual address is a valid one in SV39
+	/// The address is valid when bit 38 and all more significant bits match
 	fn is_valid_address(virtual_address: VirtAddr) -> bool {
-		//virtual_address < VirtAddr(1u64 << 39)
 		if virtual_address.as_u64() & (1 << 38) != 0 {
 			return virtual_address.as_u64() >> 39 == (1 << (64 - 39)) - 1;
 		} else {
@@ -483,7 +482,6 @@ where
 
 			// Does the table exist yet?
 			if !self.entries[index].is_present() {
-				// trace!("New PT");
 				// Allocate a single 4 KiB page for the new entry and mark it as a valid, writable subtable.
 				let new_entry = physicalmem::allocate(BasePageSize::SIZE).unwrap();
 				self.entries[index].set(new_entry, PageTableEntryFlags::BLANK);
@@ -747,9 +745,6 @@ pub fn init_page_tables() {
 			get_mem_base(),
 			get_mem_base() + PhysAddr(physicalmem::total_memory_size() as u64 - 1),
 		);
-
-		sfence_vma(0, 0);
-
 		satp::write(0x8 << 60 | ((&ROOT_PAGETABLE as *const _ as usize) >> 12))
 	}
 }
@@ -757,7 +752,6 @@ pub fn init_page_tables() {
 pub fn init_application_processor() {
 	//debug!("Identity map the physical memory using HugePages");
 	unsafe {
-		sfence_vma(0, 0);
 		satp::write(0x8 << 60 | ((&ROOT_PAGETABLE as *const _ as usize) >> 12))
 	}
 }

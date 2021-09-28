@@ -751,7 +751,5 @@ pub fn init_page_tables() {
 
 pub fn init_application_processor() {
 	//debug!("Identity map the physical memory using HugePages");
-	unsafe {
-		satp::write(0x8 << 60 | ((&ROOT_PAGETABLE as *const _ as usize) >> 12))
-	}
+	unsafe { satp::write(0x8 << 60 | ((&ROOT_PAGETABLE as *const _ as usize) >> 12)) }
 }

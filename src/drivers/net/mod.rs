@@ -23,11 +23,8 @@ use crate::arch::kernel::mmio::get_network_driver;
 #[cfg(all(feature = "pci", not(target_arch = "riscv64")))]
 use crate::arch::kernel::pci::get_network_driver;
 use crate::arch::kernel::percore::*;
-use crate::scheduler::task::TaskHandle;
 use crate::synch::semaphore::*;
 use crate::synch::spinlock::SpinlockIrqSave;
-use alloc::collections::BTreeMap;
-use core::sync::atomic::{AtomicBool, Ordering};
 
 /// A trait for accessing the network interface
 pub trait NetworkInterface {

@@ -7,6 +7,7 @@
 
 use core::{alloc::AllocError, convert::TryInto};
 
+pub use crate::arch::aarch64::kernel::get_mem_base;
 use crate::arch::aarch64::mm::paging::{BasePageSize, PageSize};
 use crate::arch::aarch64::mm::{PhysAddr, VirtAddr};
 use crate::mm;

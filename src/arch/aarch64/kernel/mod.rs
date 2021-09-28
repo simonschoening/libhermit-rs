@@ -89,6 +89,10 @@ pub fn get_cmdline() -> VirtAddr {
 	VirtAddr(unsafe { core::ptr::read_volatile(&BOOT_INFO.cmdline) })
 }
 
+pub fn get_mem_base() -> PhysAddr {
+	PhysAddr(0)
+}
+
 /// Earliest initialization function called by the Boot Processor.
 pub fn message_output_init() {
 	percore::init();

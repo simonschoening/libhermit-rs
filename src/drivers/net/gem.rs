@@ -207,7 +207,6 @@ pub struct GEMDriver {
 	tx_counter: u32,
 	txbuffer: VirtAddr,
 	txbuffer_list: VirtAddr,
-	tx_len: [usize; TX_BUF_NUM as usize],
 }
 
 impl NetworkInterface for GEMDriver {
@@ -233,9 +232,17 @@ impl NetworkInterface for GEMDriver {
 
 		for i in 0..TX_BUF_NUM {
 			let index = (i + self.tx_counter) % TX_BUF_NUM;
+			let word1_addr = (self.txbuffer_list + (index * 8 + 4) as u64).as_mut_ptr::<u32>();
+			let word1 = unsafe { core::ptr::read_volatile(word1_addr) };
+			// Reuse a used buffer
+			if  word1 & TX_DESC_USED != 0 {
 
-			if self.tx_len[index as usize] == 0 {
-				self.tx_len[index as usize] = len;
+				// Clear used bit
+				unsafe { core::ptr::write_volatile(
+					word1_addr,
+					word1 & (!TX_DESC_USED),
+				);
+				}
 
 				// Set new starting point to search for next buffer
 				self.tx_counter = (index + 1) % TX_BUF_NUM;
@@ -250,10 +257,15 @@ impl NetworkInterface for GEMDriver {
 		Err(())
 	}
 
-	fn free_tx_buffer(&self, _token: usize) {
-		//Setting the length to zero indicates an unused/free buffer
-		//TODO
-		//self.tx_len[token] = 0;
+	fn free_tx_buffer(&self, token: usize) {
+		//Set used bit to indicate that the buffer can be reused
+		let word1_addr = (self.txbuffer_list + (token * 8 + 4) as u64).as_mut_ptr::<u32>();
+		let word1 = unsafe { core::ptr::read_volatile(word1_addr) };
+		unsafe { core::ptr::write_volatile(
+			word1_addr,
+			word1 | TX_DESC_USED,
+		);
+		}
 	}
 
 	fn send_tx_buffer(&mut self, id: usize, len: usize) -> Result<(), ()> {
@@ -376,8 +388,6 @@ impl NetworkInterface for GEMDriver {
 					.network_control
 					.modify(NetworkControl::TXEN::CLEAR);
 			}
-			//Setting the length to zero indicates an unused/free buffer
-			self.tx_len[0] = 0;
 		}
 
 		let ret =
@@ -665,7 +675,7 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 			// This can fail if address of buffers is > 32 bit
 			// TODO: 64-bit addresses
 			let mut word0_entry: u32 = buffer.as_u64().try_into().unwrap();
-			let mut word1_entry: u32 = 0;
+			let mut word1_entry: u32 = TX_DESC_USED;
 			// Mark the last descriptor in the buffer descriptor list with the wrap bit
 			if i == TX_BUF_NUM - 1 {
 				word1_entry |= TX_DESC_WRAP;
@@ -712,7 +722,6 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		tx_counter: 0,
 		txbuffer: txbuffer,
 		txbuffer_list: txbuffer_list,
-		tx_len: [0; TX_BUF_NUM as usize],
 	})
 }
 

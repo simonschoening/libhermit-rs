@@ -166,7 +166,7 @@ pub extern "C" fn trap_handler(tf: &mut TrapFrame) {
 	trace!("stvall: {:x}", stval);
 	trace!("sepc: {:x}", sepc);
 	trace!("SSTATUS FS: {:?}", sstatus::read().fs());
-	trace!("FCSR: {:?}", fcsr::read());
+	trace!("FCSR: {:x?}", fcsr::read());
 	//loop{}
 	match scause.cause() {
 		Trap::Interrupt(I::SupervisorExternal) => external_handler(),
@@ -178,7 +178,15 @@ pub extern "C" fn trap_handler(tf: &mut TrapFrame) {
 		//Trap::Exception(E::LoadPageFault) => page_fault(stval, tf),
 		//Trap::Exception(E::StorePageFault) => page_fault(stval, tf),
 		//Trap::Exception(E::InstructionPageFault) => page_fault(stval, tf),
-		_ => panic!("unhandled trap {:?}", scause.cause()),
+		_ => {
+			error!("Interrupt: {:?} ", scause.cause());
+			error!("tf: {:x?} ", tf);
+			error!("stvall: {:x}", stval);
+			error!("sepc: {:x}", sepc);
+			error!("SSTATUS FS: {:?}", sstatus::read().fs());
+			error!("FCSR: {:x?}", fcsr::read());
+			panic!("unhandled trap {:?}", scause.cause())
+		},
 	}
 	trace!("Interrupt end");
 }

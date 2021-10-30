@@ -616,7 +616,7 @@ pub fn virtual_to_physical(virtual_address: VirtAddr) -> PhysAddr {
 
 	for i in (0..PAGE_LEVELS) {
 		vpn[i] = (virtual_address >> (PAGE_BITS + i * PAGE_MAP_BITS)) & PAGE_MAP_MASK as u64;
-		debug!(
+		trace!(
 			"i: {}, vpn[i]: {:#X}, {:#X}",
 			i,
 			vpn[i],
@@ -627,7 +627,7 @@ pub fn virtual_to_physical(virtual_address: VirtAddr) -> PhysAddr {
 	let mut page_table_addr = unsafe { &ROOT_PAGETABLE as *const PageTable<L2Table> };
 	for i in (0..PAGE_LEVELS).rev() {
 		let pte = unsafe { (*page_table_addr).entries[(vpn[i]) as usize] };
-		debug!("PTE: {:?} , i: {}, vpn[i]: {:#X}", pte, i, vpn[i]);
+		trace!("PTE: {:?} , i: {}, vpn[i]: {:#X}", pte, i, vpn[i]);
 		//Translation would raise a page-fault exception
 		assert!(
 			pte.is_present() && !(!pte.is_readable() && pte.is_writable()),
@@ -637,14 +637,14 @@ pub fn virtual_to_physical(virtual_address: VirtAddr) -> PhysAddr {
 
 		if pte.is_executable() || pte.is_readable() {
 			//PTE is a leaf
-			debug!("PTE is a leaf");
+			trace!("PTE is a leaf");
 			let mut phys_address = virtual_address.as_u64() & ((1 << PAGE_BITS) - 1);
 			for j in 0..i {
 				phys_address = phys_address | (vpn[j]) << (PAGE_BITS + j * PAGE_MAP_BITS);
 			}
 			let ppn = pte.address().as_u64();
 			for j in i..PAGE_LEVELS {
-				debug!(
+				trace!(
 					"ppn: {:#X}, {:#X}",
 					ppn,
 					ppn & (PAGE_MAP_MASK << (PAGE_BITS + j * PAGE_MAP_BITS)) as u64
@@ -657,7 +657,7 @@ pub fn virtual_to_physical(virtual_address: VirtAddr) -> PhysAddr {
 			//PTE is a pointer to the next level of the page table
 			assert!(i != 0); //pte should be a leaf if i=0
 			page_table_addr = pte.address().as_usize() as *mut PageTable<L2Table>;
-			debug!("PTE is pointer: {:?}", page_table_addr);
+			trace!("PTE is pointer: {:?}", page_table_addr);
 		}
 	}
 	panic!("virtual_to_physical should never reach this point");
@@ -738,7 +738,7 @@ pub fn identity_map<S: PageSize>(start_address: PhysAddr, end_address: PhysAddr)
 }
 
 pub fn init_page_tables() {
-	debug!("Identity map the physical memory using HugePages");
+	trace!("Identity map the physical memory using HugePages");
 
 	unsafe {
 		identity_map::<HugePageSize>(
@@ -750,6 +750,6 @@ pub fn init_page_tables() {
 }
 
 pub fn init_application_processor() {
-	//debug!("Identity map the physical memory using HugePages");
+	trace!("Identity map the physical memory using HugePages");
 	unsafe { satp::write(0x8 << 60 | ((&ROOT_PAGETABLE as *const _ as usize) >> 12)) }
 }

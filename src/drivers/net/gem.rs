@@ -337,7 +337,7 @@ impl NetworkInterface for GEMDriver {
 
 	// Tells driver, that buffer is consumed and can be deallocated
 	fn rx_buffer_consumed(&mut self, handle: usize) {
-		debug!("rx_buffer_consumed");
+		debug!("rx_buffer_consumed: handle: {}", handle);
 
 		let word0_addr = (self.rxbuffer_list + (handle * 8) as u64);
 		let word1_addr = word0_addr + 4 as u64;
@@ -353,30 +353,31 @@ impl NetworkInterface for GEMDriver {
 
 	fn set_polling_mode(&mut self, value: bool) {
 		debug!("set_polling_mode");
-		// if value {
-		// 	// disable interrupts from the NIC
-		// 	unsafe {
-		// 		outw(self.iobase + IMR, INT_MASK_NO_ROK);
-		// 	}
-		// } else {
-		// 	// Enable all known interrupts by setting the interrupt mask.
-		// 	unsafe {
-		// 		outw(self.iobase + IMR, INT_MASK);
-		// 	}
-		// }
+		if value {
+			// disable interrupts from the NIC
+			unsafe {
+				(*self.gem).int_disable.set(0x7FF_FEFF);
+			}
+		} else {
+			// Enable all known interrupts by setting the interrupt mask.
+			unsafe {
+				(*self.gem).int_enable.write(Interrupts::FRAMERX::SET);
+			}
+		}
 	}
 
 	fn handle_interrupt(&mut self) -> bool {
-		debug!("handle_interrupt");
+
 		let int_status = unsafe { (*self.gem).int_status.extract() };
 
 		let receive_status = unsafe { (*self.gem).receive_status.extract() };
 
 		let transmit_status = unsafe { (*self.gem).transmit_status.extract() };
 
+		debug!("handle_interrupt\nint_status: {:?}\nreceive_status: {:?}\ntransmit_status: {:?}", int_status, receive_status, transmit_status);
+
 		if transmit_status.is_set(TransmitStatus::TXCOMPL) {
-			trace!("TX COMPLETE");
-			//loop{}
+			debug!("TX COMPLETE");
 			unsafe {
 				(*self.gem)
 					.int_status
@@ -394,6 +395,7 @@ impl NetworkInterface for GEMDriver {
 			int_status.is_set(Interrupts::FRAMERX) && receive_status.is_set(RecieveStatus::FRAMERX);
 
 		if ret {
+			debug!("RX COMPLETE");
 			unsafe {
 				(*self.gem)
 					.int_status
@@ -528,9 +530,9 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		// Enable FCS remove
 		(*gem).network_config.modify(NetworkConfig::FCSREM::SET);
 
-		// Set the MAC address TODO
-		(*gem).spec_add1_bottom.set(0x5f26bf5e);
-		(*gem).spec_add1_top.set(0x14cc);
+		// Set the MAC address TODO 70:b3:d5:92:f6:89
+		(*gem).spec_add1_bottom.set(0x92d5b370);
+		(*gem).spec_add1_top.set(0x89f6);
 
 		// Program the DMA configuration register
 
@@ -554,8 +556,11 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		// Program the Network Control Register
 
 		// Enable MDIO and enable transmitter/receiver
+		// (*gem).network_control.modify(
+		// 	NetworkControl::MDEN::SET + NetworkControl::TXEN::SET + NetworkControl::RXEN::SET,
+		// );
 		(*gem).network_control.modify(
-			NetworkControl::MDEN::SET + NetworkControl::TXEN::SET + NetworkControl::RXEN::SET,
+			NetworkControl::MDEN::SET,
 		);
 
 		// PHY Initialization
@@ -646,6 +651,7 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		// Init Receive Buffer Descriptor List
 		for i in 0..RX_BUF_NUM {
 			let word0 = (rxbuffer_list + (i * 8) as u64).as_mut_ptr::<u32>();
+			let word1 = (rxbuffer_list + (i * 8 + 4) as u64).as_mut_ptr::<u32>();
 			let buffer = virt_to_phys(rxbuffer + (i * RX_BUF_LEN) as u64);
 			if (buffer.as_u64() & 0b11) != 0 {
 				error!("Wrong buffer alignment");
@@ -660,6 +666,7 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 				word0_entry |= 0b10;
 			}
 			core::ptr::write_volatile(word0, word0_entry);
+			core::ptr::write_volatile(word1, 0x0);
 		}
 
 		let rx_qbar: u32 = virt_to_phys(rxbuffer_list).as_u64().try_into().unwrap();
@@ -703,8 +710,8 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		(*gem).network_control.modify(NetworkControl::RXEN::SET);
 	}
 
-	// 5e:bf:26:5f:cc:14. TODO: Device tree
-	let mac: [u8; 6] = unsafe { [0x5e, 0xbf, 0x26, 0x5f, 0xcc, 0x14] };
+	// 70:b3:d5:92:f6:89. TODO: Device tree
+	let mac: [u8; 6] = unsafe { [0x70, 0xb3, 0xd5, 0x92, 0xf6, 0x89] };
 
 	debug!(
 		"MAC address {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",

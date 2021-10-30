@@ -336,8 +336,13 @@ fn finish_processor_init() {
 	unsafe {
 		sstatus::set_fs(sstatus::FS::Initial);
 		//fcsr::clear_flags();
-		//fcsr::set_rounding_mode(fcsr::RoundingMode::RoundToNearestEven);
+		let fcsr: usize = 0;
+		asm!{
+			"csrw	fcsr, {fcsr}",
+			fcsr = in(reg) fcsr,
+		}
 
+		debug!("{}",fcsr::RoundingMode::RoundTowardsZero as u32);
 		// asm!(
 		// 	"fmv.s.x	f0, zero",
 		// 	"fmv.s.x	f1, zero",
@@ -377,7 +382,7 @@ fn finish_processor_init() {
 		// sstatus::set_fs(sstatus::FS::Initial);
 	}
 	info!("SSTATUS FS: {:?}", sstatus::read().fs());
-	info!("FCSR: {:?}", fcsr::read());
+	info!("FCSR: {:x?}", fcsr::read());
 	/*if environment::is_uhyve() {
 		// uhyve does not use apic::detect_from_acpi and therefore does not know the number of processors and
 		// their APIC IDs in advance.

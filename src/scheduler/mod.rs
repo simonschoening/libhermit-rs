@@ -21,12 +21,18 @@ use crate::arch;
 use crate::arch::irq;
 use crate::arch::mm::VirtAddr;
 use crate::arch::percore::*;
+#[cfg(not(target_arch = "riscv64"))]
 use crate::arch::switch::{switch_to_fpu_owner, switch_to_task};
+#[cfg(target_arch = "riscv64")]
+use crate::arch::switch::switch_to_task;
 use crate::collections::irqsave;
 use crate::config::*;
 use crate::kernel::scheduler::TaskStacks;
 use crate::scheduler::task::*;
 use crate::synch::spinlock::*;
+
+#[cfg(target_arch = "riscv64")]
+use riscv::register::sstatus;
 
 pub mod task;
 
@@ -525,29 +531,30 @@ impl PerCoreScheduler {
 					unsafe { *last_stack_pointer },
 					new_stack_pointer
 				);
-				self.current_task = task;
 
 				// Finally save our current context and restore the context of the new task.
+				#[cfg(not(target_arch = "riscv64"))]
 				if is_idle || Rc::ptr_eq(&self.current_task, &self.fpu_owner) {
 					unsafe {
-						#[cfg(not(target_arch = "riscv64"))]
+						self.current_task = task;
 						switch_to_fpu_owner(last_stack_pointer, new_stack_pointer.as_usize());
-						//#[cfg(target_arch = "riscv64")]
-						//warn!("switch_to_fpu_owner not implemented");
-						#[cfg(target_arch = "riscv64")]
-						switch_to_task(last_stack_pointer, new_stack_pointer.as_usize());
 					}
 				} else {
 					unsafe {
-						// debug!("last_stack_pointer addr {:p}", last_stack_pointer);
-						// let state = last_stack_pointer as *mut crate::arch::riscv::kernel::scheduler::State;
-						// debug!("state: {:#X?}", *state);
-						// let state_new = new_stack_pointer.as_mut_ptr::<crate::arch::riscv::kernel::scheduler::State>();
-						// debug!("state_new addr: {:p}", state_new);
-						// debug!("state_new: {:#X?}", *state_new);
-						// debug!("switch_to_task: {:p}", switch_to_task as *const ());
+						self.current_task = task;
 						switch_to_task(last_stack_pointer, new_stack_pointer.as_usize());
-						//panic!("switch_to_task not implemented");
+					}
+				}
+
+				#[cfg(target_arch = "riscv64")]
+				{
+					if sstatus::read().fs() == sstatus::FS::Dirty {
+						self.current_task.borrow_mut().last_fpu_state.save();
+					}
+					task.borrow().last_fpu_state.restore();
+					self.current_task = task;
+					unsafe {
+						switch_to_task(last_stack_pointer, new_stack_pointer.as_usize());
 					}
 				}
 			}

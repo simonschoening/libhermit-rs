@@ -13,10 +13,10 @@ use crate::arch;
 use crate::arch::irq;
 use crate::arch::mm::VirtAddr;
 use crate::arch::percore::*;
-#[cfg(not(target_arch = "riscv64"))]
-use crate::arch::switch::{switch_to_fpu_owner, switch_to_task};
 #[cfg(target_arch = "riscv64")]
 use crate::arch::switch::switch_to_task;
+#[cfg(not(target_arch = "riscv64"))]
+use crate::arch::switch::{switch_to_fpu_owner, switch_to_task};
 use crate::collections::irqsave;
 use crate::config::*;
 use crate::kernel::scheduler::TaskStacks;

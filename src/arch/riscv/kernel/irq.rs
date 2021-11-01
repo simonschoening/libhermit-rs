@@ -186,7 +186,7 @@ pub extern "C" fn trap_handler(tf: &mut TrapFrame) {
 			error!("SSTATUS FS: {:?}", sstatus::read().fs());
 			error!("FCSR: {:x?}", fcsr::read());
 			panic!("unhandled trap {:?}", scause.cause())
-		},
+		}
 	}
 	trace!("Interrupt end");
 }

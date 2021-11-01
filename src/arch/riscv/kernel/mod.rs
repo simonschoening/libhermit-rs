@@ -337,12 +337,12 @@ fn finish_processor_init() {
 		sstatus::set_fs(sstatus::FS::Initial);
 		//fcsr::clear_flags();
 		let fcsr: usize = 0;
-		asm!{
+		asm! {
 			"csrw	fcsr, {fcsr}",
 			fcsr = in(reg) fcsr,
 		}
 
-		debug!("{}",fcsr::RoundingMode::RoundTowardsZero as u32);
+		debug!("{}", fcsr::RoundingMode::RoundTowardsZero as u32);
 		// asm!(
 		// 	"fmv.s.x	f0, zero",
 		// 	"fmv.s.x	f1, zero",

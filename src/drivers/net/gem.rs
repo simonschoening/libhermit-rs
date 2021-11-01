@@ -235,13 +235,10 @@ impl NetworkInterface for GEMDriver {
 			let word1_addr = (self.txbuffer_list + (index * 8 + 4) as u64).as_mut_ptr::<u32>();
 			let word1 = unsafe { core::ptr::read_volatile(word1_addr) };
 			// Reuse a used buffer
-			if  word1 & TX_DESC_USED != 0 {
-
+			if word1 & TX_DESC_USED != 0 {
 				// Clear used bit
-				unsafe { core::ptr::write_volatile(
-					word1_addr,
-					word1 & (!TX_DESC_USED),
-				);
+				unsafe {
+					core::ptr::write_volatile(word1_addr, word1 & (!TX_DESC_USED));
 				}
 
 				// Set new starting point to search for next buffer
@@ -261,10 +258,8 @@ impl NetworkInterface for GEMDriver {
 		//Set used bit to indicate that the buffer can be reused
 		let word1_addr = (self.txbuffer_list + (token * 8 + 4) as u64).as_mut_ptr::<u32>();
 		let word1 = unsafe { core::ptr::read_volatile(word1_addr) };
-		unsafe { core::ptr::write_volatile(
-			word1_addr,
-			word1 | TX_DESC_USED,
-		);
+		unsafe {
+			core::ptr::write_volatile(word1_addr, word1 | TX_DESC_USED);
 		}
 	}
 
@@ -367,14 +362,16 @@ impl NetworkInterface for GEMDriver {
 	}
 
 	fn handle_interrupt(&mut self) -> bool {
-
 		let int_status = unsafe { (*self.gem).int_status.extract() };
 
 		let receive_status = unsafe { (*self.gem).receive_status.extract() };
 
 		let transmit_status = unsafe { (*self.gem).transmit_status.extract() };
 
-		debug!("handle_interrupt\nint_status: {:?}\nreceive_status: {:?}\ntransmit_status: {:?}", int_status, receive_status, transmit_status);
+		debug!(
+			"handle_interrupt\nint_status: {:?}\nreceive_status: {:?}\ntransmit_status: {:?}",
+			int_status, receive_status, transmit_status
+		);
 
 		if transmit_status.is_set(TransmitStatus::TXCOMPL) {
 			debug!("TX COMPLETE");
@@ -559,9 +556,7 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		// (*gem).network_control.modify(
 		// 	NetworkControl::MDEN::SET + NetworkControl::TXEN::SET + NetworkControl::RXEN::SET,
 		// );
-		(*gem).network_control.modify(
-			NetworkControl::MDEN::SET,
-		);
+		(*gem).network_control.modify(NetworkControl::MDEN::SET);
 
 		// PHY Initialization
 

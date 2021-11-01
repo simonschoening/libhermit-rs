@@ -127,9 +127,9 @@ impl FPUState {
 	}
 
 	pub fn restore(&self) {
-		unsafe{
+		unsafe {
 			trace!("Restore FPUState at {:p} with {:x?}", self, self);
-			asm!{
+			asm! {
 				"fld f0, (8*0)({fpu_state})",
 				"fld f1, (8*1)({fpu_state})",
 				"fld f2, (8*2)({fpu_state})",
@@ -171,9 +171,9 @@ impl FPUState {
 	}
 
 	pub fn save(&mut self) {
-		unsafe{
+		unsafe {
 			trace!("Save FPUState at {:p}", self);
-			asm!{
+			asm! {
 				"fsd f0, (8*0)({fpu_state})",
 				"fsd f1, (8*1)({fpu_state})",
 				"fsd f2, (8*2)({fpu_state})",

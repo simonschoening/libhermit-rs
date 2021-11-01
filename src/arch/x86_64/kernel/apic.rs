@@ -1,10 +1,3 @@
-// Copyright (c) 2017 Colin Finck, RWTH Aachen University
-//
-// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
-// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
-// http://opensource.org/licenses/MIT>, at your option. This file may not be
-// copied, modified, or distributed except according to those terms.
-
 use crate::arch;
 #[cfg(feature = "acpi")]
 use crate::arch::x86_64::kernel::acpi;
@@ -267,20 +260,40 @@ fn detect_from_acpi() -> Result<PhysAddr, ()> {
 	Ok(PhysAddr(madt_header.local_apic_address.into()))
 }
 
+fn default_apic() -> PhysAddr {
+	warn!("Try to use default APIC address");
+
+	let default_address = PhysAddr(0xFEC0_0000);
+
+	unsafe {
+		IOAPIC_ADDRESS = virtualmem::allocate(BasePageSize::SIZE).unwrap();
+		debug!(
+			"Mapping IOAPIC at {:#X} to virtual address {:#X}",
+			default_address, IOAPIC_ADDRESS
+		);
+
+		let mut flags = PageTableEntryFlags::empty();
+		flags.device().writable().execute_disable();
+		paging::map::<BasePageSize>(IOAPIC_ADDRESS, default_address, 1, flags);
+	}
+
+	PhysAddr(0xFEE0_0000)
+}
+
 fn detect_from_uhyve() -> Result<PhysAddr, ()> {
 	if environment::is_uhyve() {
-		let defaullt_address = PhysAddr(0xFEC0_0000);
+		let default_address = PhysAddr(0xFEC0_0000);
 
 		unsafe {
 			IOAPIC_ADDRESS = virtualmem::allocate(BasePageSize::SIZE).unwrap();
 			debug!(
 				"Mapping IOAPIC at {:#X} to virtual address {:#X}",
-				defaullt_address, IOAPIC_ADDRESS
+				default_address, IOAPIC_ADDRESS
 			);
 
 			let mut flags = PageTableEntryFlags::empty();
 			flags.device().writable().execute_disable();
-			paging::map::<BasePageSize>(IOAPIC_ADDRESS, defaullt_address, 1, flags);
+			paging::map::<BasePageSize>(IOAPIC_ADDRESS, default_address, 1, flags);
 		}
 
 		return Ok(PhysAddr(0xFEE0_0000));
@@ -309,8 +322,8 @@ pub fn init() {
 
 	// Detect CPUs and APICs.
 	let local_apic_physical_address = detect_from_uhyve()
-		.or_else(|_e| detect_from_acpi())
-		.expect("HermitCore requires an APIC system");
+		.or_else(|_| detect_from_acpi())
+		.unwrap_or_else(|_| default_apic());
 
 	// Initialize x2APIC or xAPIC, depending on what's available.
 	init_x2apic();

@@ -4,6 +4,7 @@ use crate::arch::riscv::kernel::{get_dtb_ptr, is_uhyve};
 use crate::arch::riscv::mm::{paging, PhysAddr, VirtAddr};
 use alloc::vec::Vec;
 use core::ptr;
+use core::convert::TryFrom;
 use hermit_dtb::Dtb;
 
 use crate::drivers::net::gem::{self, GEMDriver};
@@ -14,6 +15,7 @@ struct Gem {
 	size: usize,
 	irq: u8,
 	phy_addr: u8,
+	mac: [u8; 6],
 }
 
 struct Plic {
@@ -75,6 +77,7 @@ pub fn init_drivers() {
 						VirtAddr(gem.base as u64),
 						gem.irq.into(),
 						gem.phy_addr.into(),
+						gem.mac,
 					) {
 						Ok(drv) => register_driver(MmioDriver::GEMNet(SpinlockIrqSave::new(drv))),
 						Err(_) => (), // could have an info which driver failed
@@ -134,9 +137,14 @@ fn walk_nodes<'a, 'b>(dtb: &Dtb<'a>, path: &'b str, level: usize) {
 
 				let interrupts = dtb
 					.get_property(path, "interrupts")
-					.expect("Reg property for ethernet not found in dtb");
+					.expect("interrupts property for ethernet not found in dtb");
 				let irq: u8 = interrupts[3];
 
+				let mac = dtb
+					.get_property(path, "local-mac-address")
+					.expect("local-mac-address property for ethernet not found in dtb");
+				debug!("MAC: {:x?}",mac);
+				
 				let path = &[path, "ethernet-phy"].concat();
 				debug!("{}", path);
 				let phy = dtb
@@ -150,6 +158,7 @@ fn walk_nodes<'a, 'b>(dtb: &Dtb<'a>, path: &'b str, level: usize) {
 						size: gem_size as usize,
 						irq: irq,
 						phy_addr: phy_addr,
+						mac: <[u8; 6]>::try_from(mac).expect("mac with invalid length"),
 					}));
 				}
 			} else {

@@ -482,7 +482,7 @@ impl Drop for GEMDriver {
 	}
 }
 
-pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDriver, DriverError> {
+pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32, mac: [u8; 6]) -> Result<GEMDriver, DriverError> {
 	debug!("Init GEM at {:p}", gem_base);
 
 	let gem = gem_base.as_mut_ptr::<Registers>();
@@ -527,9 +527,11 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		// Enable FCS remove
 		(*gem).network_config.modify(NetworkConfig::FCSREM::SET);
 
-		// Set the MAC address TODO 70:b3:d5:92:f6:89
-		(*gem).spec_add1_bottom.set(0x92d5b370);
-		(*gem).spec_add1_top.set(0x89f6);
+		// Set the MAC address
+		let bottom: u32 = ((mac[3] as u32) << 24) + ((mac[2] as u32) << 16) + ((mac[1] as u32) << 8) + ((mac[0] as u32) << 0);
+		let top: u32 = ((mac[5] as u32) << 8) + ((mac[4] as u32) << 0);
+		(*gem).spec_add1_bottom.set(bottom);
+		(*gem).spec_add1_top.set(top);
 
 		// Program the DMA configuration register
 
@@ -704,9 +706,6 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32) -> Result<GEMDri
 		// Enable the receiver
 		(*gem).network_control.modify(NetworkControl::RXEN::SET);
 	}
-
-	// 70:b3:d5:92:f6:89. TODO: Device tree
-	let mac: [u8; 6] = unsafe { [0x70, 0xb3, 0xd5, 0x92, 0xf6, 0x89] };
 
 	debug!(
 		"MAC address {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",

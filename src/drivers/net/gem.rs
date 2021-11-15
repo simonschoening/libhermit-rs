@@ -93,7 +93,7 @@ register_bitfields! [
 		TXSIZE		OFFSET(10) NUMBITS(1) [],
 		RXSIZE		OFFSET(8) NUMBITS(2) [
 			//Supported on all devices?
-			FULL_DDRESSABLE_SPACE = 3
+			FULL_ADDRESSABLE_SPACE = 3
 		],
 		ENDIAN		OFFSET(7) NUMBITS(1) [],
 		BLENGTH		OFFSET(0) NUMBITS(5) [
@@ -542,7 +542,7 @@ pub fn init_device(gem_base: VirtAddr, irq: u16, phy_addr: u32, mac: [u8; 6]) ->
 		// Set the receiver packet buffer memory size to the full configured addressable space
 		(*gem)
 			.dma_config
-			.modify(DMAConfig::RXSIZE::FULL_DDRESSABLE_SPACE);
+			.modify(DMAConfig::RXSIZE::FULL_ADDRESSABLE_SPACE);
 		// Set the transmitter packet buffer memory size to the full configured addressable space
 		(*gem).dma_config.modify(DMAConfig::TXSIZE::SET);
 		// Enable TCP/IP checksum generation offload on the transmitter

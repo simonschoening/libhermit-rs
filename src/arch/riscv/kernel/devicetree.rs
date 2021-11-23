@@ -1,4 +1,5 @@
 use crate::arch::riscv::kernel::irq::init_plic;
+use crate::arch::riscv::kernel::cache::init_cache;
 use crate::arch::riscv::kernel::mmio::*;
 use crate::arch::riscv::kernel::{get_dtb_ptr, is_uhyve};
 use crate::arch::riscv::mm::{paging, PhysAddr, VirtAddr};
@@ -23,9 +24,15 @@ struct Plic {
 	size: usize,
 }
 
+struct CacheController {
+	base: usize,
+	size: usize,
+}
+
 enum Device {
 	GEM(Gem),
 	PLIC(Plic),
+	CACHECONTROLLER(CacheController),
 }
 
 static mut MEM_BASE: u64 = 0;
@@ -64,7 +71,7 @@ pub fn init_drivers() {
 		for i in 0..DEVICES_AVAILABLE.len() {
 			match &DEVICES_AVAILABLE[i] {
 				Device::GEM(gem) => {
-					//TODO: Make sure that PLIC is initialized
+					//TODO: Make sure that PLIC is initialized before GEM
 					debug!(
 						"Init GEM at {:x}, irq: {}, phy_addr: {}",
 						gem.base, gem.irq, gem.phy_addr
@@ -91,9 +98,16 @@ pub fn init_drivers() {
 					);
 					init_plic(plic.base);
 				}
+				Device::CACHECONTROLLER(cachec) => {
+					debug!("Init cache controller at {:x}, size: {:x}", cachec.base, cachec.size);
+					paging::identity_map::<paging::HugePageSize>(
+						PhysAddr(cachec.base as u64),
+						PhysAddr((cachec.base + cachec.size - 1) as u64),
+					);
+					init_cache(cachec.base);
+				}
 			}
 		}
-		// loop {}
 	}
 }
 
@@ -201,6 +215,44 @@ fn walk_nodes<'a, 'b>(dtb: &Dtb<'a>, path: &'b str, level: usize) {
 				}
 			} else {
 				warn!("The interrupt controller is not supported");
+			}
+		} else if node.starts_with("cache-controller@") {
+			debug!("Found cache controller");
+			let path = &[path, node, "/"].concat();
+
+			let compatible = core::str::from_utf8(
+				dtb.get_property(path, "compatible")
+					.expect("compatible property for cache-controller not found in dtb"),
+			)
+			.unwrap();
+			debug!("Compatible: {}", compatible);
+			if compatible.contains("sifive,fu540-c000-ccache") || compatible.contains("sifive,fu740-c000-ccache"){
+				let reg = dtb
+					.get_property(path, "reg")
+					.expect("Reg property for cache controller not found in dtb");
+				let mut cachec_size: u64 = 0;
+				let mut cachec_base: u64 = 0;
+				for i in 8..16 {
+					cachec_size <<= 8;
+					cachec_size += reg[i] as u64;
+				}
+				for i in 0..8 {
+					cachec_base <<= 8;
+					cachec_base += reg[i] as u64;
+				}
+
+				unsafe {
+					//Insert before
+					DEVICES_AVAILABLE.insert(
+						0,
+						Device::CACHECONTROLLER(CacheController {
+							base: cachec_base as usize,
+							size: cachec_size as usize,
+						}),
+					);
+				}
+			} else {
+				warn!("The cache controller is not supported");
 			}
 		}
 		walk_nodes(&dtb, &[path, node, "/"].concat(), level + 1);

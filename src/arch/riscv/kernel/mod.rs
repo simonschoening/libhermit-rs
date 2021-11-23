@@ -1,4 +1,5 @@
 mod devicetree;
+pub mod cache;
 pub mod irq;
 pub mod mmio;
 pub mod pci;

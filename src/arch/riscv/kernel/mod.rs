@@ -10,6 +10,7 @@ pub mod serial;
 mod start;
 pub mod switch;
 pub mod systemtime;
+pub mod externs_linux;
 
 pub use crate::arch::riscv::kernel::devicetree::{get_mem_base, init_drivers};
 use crate::arch::riscv::kernel::percore::*;

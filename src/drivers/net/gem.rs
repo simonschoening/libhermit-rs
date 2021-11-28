@@ -323,7 +323,7 @@ impl NetworkInterface for GEMDriver {
 						length as usize,
 					)
 				};
-				debug!("BUFFER: {:x?}", buffer);
+				trace!("BUFFER: {:x?}", buffer);
 				Ok((buffer, index as usize))
 			}
 			None => Err(()),

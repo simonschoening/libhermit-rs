@@ -1,5 +1,4 @@
 use alloc::collections::BTreeMap;
-use core::convert::TryInto;
 #[cfg(feature = "newlib")]
 use core::slice;
 use core::{intrinsics, ptr};
@@ -23,6 +22,8 @@ pub mod fuse;
 pub mod gdt;
 pub mod idt;
 pub mod irq;
+#[cfg(not(feature = "pci"))]
+pub mod mmio;
 #[cfg(feature = "pci")]
 pub mod pci;
 #[cfg(feature = "pci")]

@@ -1,7 +1,10 @@
 #[cfg(feature = "pci")]
 pub mod rtl8139;
-#[cfg(feature = "pci")]
+#[cfg(not(feature = "pci"))]
+pub mod virtio_mmio;
 pub mod virtio_net;
+#[cfg(feature = "pci")]
+pub mod virtio_pci;
 
 #[cfg(target_arch = "riscv64")]
 pub mod gem;
@@ -10,10 +13,10 @@ pub mod gem;
 use crate::arch::kernel::apic;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::kernel::irq::ExceptionStackFrame;
-#[cfg(target_arch = "riscv64")]
-use crate::arch::kernel::mmio::get_network_driver;
-#[cfg(all(feature = "pci", not(target_arch = "riscv64")))]
-use crate::arch::kernel::pci::get_network_driver;
+#[cfg(not(feature = "pci"))]
+use crate::arch::kernel::mmio;
+#[cfg(feature = "pci")]
+use crate::arch::kernel::pci;
 use crate::arch::kernel::percore::*;
 use crate::synch::semaphore::*;
 use crate::synch::spinlock::SpinlockIrqSave;
@@ -56,8 +59,8 @@ pub extern "C" fn set_polling_mode(value: bool) {
 		*guard += 1;
 
 		if *guard == 1 {
-			#[cfg(any(feature = "pci", target_arch = "riscv64"))]
-			if let Some(driver) = get_network_driver() {
+			#[cfg(feature = "pci")]
+			if let Some(driver) = crate::arch::kernel::pci::get_network_driver() {
 				driver.lock().set_polling_mode(value)
 			}
 		}
@@ -65,8 +68,8 @@ pub extern "C" fn set_polling_mode(value: bool) {
 		*guard -= 1;
 
 		if *guard == 0 {
-			#[cfg(any(feature = "pci", target_arch = "riscv64"))]
-			if let Some(driver) = get_network_driver() {
+			#[cfg(feature = "pci")]
+			if let Some(driver) = crate::arch::kernel::pci::get_network_driver() {
 				driver.lock().set_polling_mode(value)
 			}
 		}
@@ -87,16 +90,21 @@ pub extern "x86-interrupt" fn network_irqhandler(_stack_frame: ExceptionStackFra
 	apic::eoi();
 
 	#[cfg(feature = "pci")]
-	let check_scheduler = match get_network_driver() {
+	let check_scheduler = match pci::get_network_driver() {
 		Some(driver) => driver.lock().handle_interrupt(),
 		_ => {
 			debug!("Unable to handle interrupt!");
 			false
 		}
 	};
-
 	#[cfg(not(feature = "pci"))]
-	let check_scheduler = false;
+	let check_scheduler = match mmio::get_network_driver() {
+		Some(driver) => driver.lock().handle_interrupt(),
+		_ => {
+			debug!("Unable to handle interrupt!");
+			false
+		}
+	};
 
 	if check_scheduler {
 		core_scheduler().scheduler();
@@ -107,7 +115,19 @@ pub extern "x86-interrupt" fn network_irqhandler(_stack_frame: ExceptionStackFra
 pub fn network_irqhandler() {
 	debug!("Receive network interrupt");
 
-	let check_scheduler = match get_network_driver() {
+	// TODO: PLIC end of interrupt
+	//apic::eoi();
+
+	#[cfg(feature = "pci")]
+	let check_scheduler = match pci::get_network_driver() {
+		Some(driver) => driver.lock().handle_interrupt(),
+		_ => {
+			debug!("Unable to handle interrupt!");
+			false
+		}
+	};
+	#[cfg(not(feature = "pci"))]
+	let check_scheduler = match mmio::get_network_driver() {
 		Some(driver) => driver.lock().handle_interrupt(),
 		_ => {
 			debug!("Unable to handle interrupt!");

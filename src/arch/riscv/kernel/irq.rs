@@ -9,6 +9,9 @@ use crate::synch::spinlock::Spinlock;
 /// base address of the PLIC, only one access at the same time is allowed
 static PLIC_BASE: Spinlock<usize> = Spinlock::new(0x0);
 
+/// PLIC context for new interrupt handlers
+static PLIC_CONTEXT: Spinlock<u16> = Spinlock::new(0x0);
+
 const PLIC_PENDING_OFFSET: usize = 0x001000;
 const PLIC_ENABLE_OFFSET: usize = 0x002000;
 
@@ -27,8 +30,9 @@ pub fn install() {
 }
 
 /// Init PLIC
-pub fn init_plic(base: usize) {
+pub fn init_plic(base: usize, context: u16) {
 	*PLIC_BASE.lock() = base;
+	*PLIC_CONTEXT.lock() = context;
 }
 
 /// Enable Interrupts
@@ -128,17 +132,23 @@ pub fn nested_enable(was_enabled: bool) {
 pub extern "C" fn irq_install_handler(irq_number: u16, handler: usize) {
 	unsafe {
 		let base_ptr = PLIC_BASE.lock();
-		debug!("Install handler for interrupt {}", irq_number);
+		let context = PLIC_CONTEXT.lock();
+		debug!(
+			"Install handler for interrupt {}, context {}",
+			irq_number, *context
+		);
 		IRQ_HANDLERS[irq_number as usize - 1] = handler;
-		// Set priority to 7 (highest)
+		// Set priority to 7 (highest on FU740)
 		let prio_address = *base_ptr + irq_number as usize * 4;
 		core::ptr::write_volatile(prio_address as *mut u32, 1);
 		// Set Threshold to 0 (lowest)
-		let thresh_address = *base_ptr + 0x20_2000;
+		let thresh_address = *base_ptr + 0x20_0000 + 0x1000 * (*context as usize);
 		core::ptr::write_volatile(thresh_address as *mut u32, 0);
-		// Enable irq for Hart 1 S-Mode
-		let enable_address =
-			*base_ptr + PLIC_ENABLE_OFFSET + 0x100 + ((irq_number / 32) * 4) as usize;
+		// Enable irq for context
+		let enable_address = *base_ptr
+			+ PLIC_ENABLE_OFFSET
+			+ 0x80 * (*context as usize)
+			+ ((irq_number / 32) * 4) as usize;
 		debug!("enable_address {:x}", enable_address);
 		core::ptr::write_volatile(enable_address as *mut u32, 1 << (irq_number % 32));
 	}
@@ -190,7 +200,9 @@ fn external_handler() {
 		let handler: Option<fn()> = {
 			// Claim interrupt
 			let base_ptr = PLIC_BASE.lock();
-			let claim_address = *base_ptr + 0x20_2004;
+			let context = PLIC_CONTEXT.lock();
+			//let claim_address = *base_ptr + 0x20_2004;
+			let claim_address = *base_ptr + 0x20_0004 + 0x1000 * (*context as usize);
 			let irq = core::ptr::read_volatile(claim_address as *mut u32);
 			if irq != 0 {
 				debug!("External INT: {}", irq);

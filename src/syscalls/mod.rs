@@ -2,7 +2,7 @@
 
 #[cfg(all(
 	not(feature = "newlib"),
-	any(all(target_arch = "x86_64", feature = "pci"), target_arch = "riscv64")
+	any(target_arch = "x86_64", target_arch = "riscv64")
 ))]
 use crate::drivers::net::*;
 use crate::environment;
@@ -161,7 +161,7 @@ pub fn sys_rx_buffer_consumed(handle: usize) -> Result<(), ()> {
 
 #[cfg(all(
 	not(feature = "newlib"),
-	any(all(target_arch = "x86_64", feature = "pci"), target_arch = "riscv64")
+	any(target_arch = "x86_64", target_arch = "riscv64")
 ))]
 #[no_mangle]
 pub extern "C" fn sys_netwait() {
@@ -170,7 +170,7 @@ pub extern "C" fn sys_netwait() {
 
 #[cfg(all(
 	not(feature = "newlib"),
-	any(all(target_arch = "x86_64", feature = "pci"), target_arch = "riscv64")
+	any(target_arch = "x86_64", target_arch = "riscv64")
 ))]
 #[no_mangle]
 pub extern "C" fn sys_set_network_polling_mode(value: bool) {

@@ -11,7 +11,9 @@ use crate::arch::mm::paging::{
 use crate::arch::mm::physicalmem::{get_mem_base, total_memory_size};
 #[cfg(feature = "newlib")]
 use crate::arch::mm::virtualmem::kernel_heap_end;
-use crate::arch::mm::{PhysAddr, VirtAddr};
+#[cfg(feature = "pci")]
+use crate::arch::mm::PhysAddr;
+use crate::arch::mm::VirtAddr;
 use crate::environment;
 use core::mem;
 
@@ -260,6 +262,7 @@ pub fn deallocate(virtual_address: VirtAddr, sz: usize) {
 }
 
 /// Maps a given physical address and size in virtual space and returns address.
+#[cfg(feature = "pci")]
 pub fn map(
 	physical_address: PhysAddr,
 	sz: usize,

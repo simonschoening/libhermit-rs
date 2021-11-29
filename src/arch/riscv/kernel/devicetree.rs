@@ -2,13 +2,24 @@ use crate::arch::riscv::kernel::irq::init_plic;
 use crate::arch::riscv::kernel::mmio::*;
 use crate::arch::riscv::kernel::{get_dtb_ptr, is_uhyve};
 use crate::arch::riscv::mm::{paging, PhysAddr, VirtAddr};
+use crate::drivers::virtio::transport::mmio as mmio_virtio;
+use crate::drivers::virtio::transport::mmio::{DevId, MmioRegisterLayout, VirtioDriver};
 use alloc::vec::Vec;
-use core::ptr;
 use core::convert::TryFrom;
+use core::ptr;
 use hermit_dtb::Dtb;
 
 use crate::drivers::net::gem::{self, GEMDriver};
 use crate::synch::spinlock::SpinlockIrqSave;
+
+pub const MAGIC_VALUE: u32 = 0x74726976 as u32;
+static mut PLATFORM_MODEL: Model = Model::UNKNOWN;
+
+enum Model {
+	FUX40,
+	VIRT,
+	UNKNOWN,
+}
 
 struct Gem {
 	base: usize,
@@ -16,6 +27,12 @@ struct Gem {
 	irq: u8,
 	phy_addr: u8,
 	mac: [u8; 6],
+}
+
+struct VirtioMMIO {
+	base: usize,
+	size: usize,
+	irq: u32,
 }
 
 struct Plic {
@@ -26,6 +43,7 @@ struct Plic {
 enum Device {
 	GEM(Gem),
 	PLIC(Plic),
+	VIRTIO_MMIO(VirtioMMIO),
 }
 
 static mut MEM_BASE: u64 = 0;
@@ -47,6 +65,25 @@ pub fn init() {
 				MEM_BASE <<= 8;
 				MEM_BASE += memory_reg[i] as u64;
 			}
+
+			let model = core::str::from_utf8(
+				dtb.get_property("/", "compatible")
+					.expect("compatible not found in dtb"),
+			)
+			.unwrap();
+			if model.contains("riscv-virtio") {
+				PLATFORM_MODEL = Model::VIRT;
+			} else if model.contains("sifive,hifive-unmatched-a00")
+				|| model.contains("sifive,hifive-unleashed-a00")
+				|| model.contains("sifive,fu740")
+				|| model.contains("sifive,fu540")
+			{
+				PLATFORM_MODEL = Model::FUX40;
+			} else {
+				warn!("Unknown platform, guessing PLIC context 1");
+				PLATFORM_MODEL = Model::UNKNOWN;
+			}
+			info!("Model: {}", model);
 		}
 	}
 }
@@ -83,13 +120,68 @@ pub fn init_drivers() {
 						Err(_) => (), // could have an info which driver failed
 					}
 				}
+				Device::VIRTIO_MMIO(dev) => {
+					//TODO: Make sure that PLIC is initialized
+					debug!("Init virtio_mmio at {:x}, irq: {}", dev.base, dev.irq);
+					paging::identity_map::<paging::HugePageSize>(
+						PhysAddr(dev.base as u64),
+						PhysAddr((dev.base + dev.size - 1) as u64),
+					);
+
+					// Verify the first register value to find out if this is really an MMIO magic-value.
+					let mmio = unsafe { &mut *(dev.base as *mut MmioRegisterLayout) };
+
+					let magic = mmio.get_magic_value();
+					let version = mmio.get_version();
+
+					if magic != MAGIC_VALUE {
+						error!("It's not a MMIO-device at {:#X}", mmio as *const _ as usize);
+					}
+
+					if version != 2 {
+						warn!("Found a leagacy device, which isn't supported");
+					} else {
+						// We found a MMIO-device (whose 512-bit address in this structure).
+						trace!("Found a MMIO-device at {:#X}", mmio as *const _ as usize);
+
+						// Verify the device-ID to find the network card
+						let id = mmio.get_device_id();
+
+						if id != DevId::VIRTIO_DEV_ID_NET {
+							debug!(
+								"It's not a network card at {:#X}",
+								mmio as *const _ as usize
+							);
+						} else {
+							info!("Found network card at {:#X}", mmio as *const _ as usize);
+
+							// crate::arch::mm::physicalmem::reserve(
+							// 	PhysAddr::from(align_down!(current_address, BasePageSize::SIZE)),
+							// 	BasePageSize::SIZE,
+							// );
+
+							match mmio_virtio::init_device(mmio, dev.irq) {
+								Ok(VirtioDriver::Network(drv)) => register_driver(
+									MmioDriver::VirtioNet(SpinlockIrqSave::new(drv)),
+								),
+								Err(_) => (), // could have an info which driver failed
+							}
+						}
+					}
+				}
 				Device::PLIC(plic) => {
 					debug!("Init PLIC at {:x}, size: {:x}", plic.base, plic.size);
 					paging::identity_map::<paging::HugePageSize>(
 						PhysAddr(plic.base as u64),
 						PhysAddr((plic.base + plic.size - 1) as u64),
 					);
-					init_plic(plic.base);
+
+					//TODO: Determine correct context via devicetree and allow more than one context
+					match PLATFORM_MODEL {
+						Model::VIRT => init_plic(plic.base, 1),
+						Model::UNKNOWN => init_plic(plic.base, 1),
+						Model::FUX40 => init_plic(plic.base, 2),
+					}
 				}
 			}
 		}
@@ -143,8 +235,8 @@ fn walk_nodes<'a, 'b>(dtb: &Dtb<'a>, path: &'b str, level: usize) {
 				let mac = dtb
 					.get_property(path, "local-mac-address")
 					.expect("local-mac-address property for ethernet not found in dtb");
-				debug!("MAC: {:x?}",mac);
-				
+				debug!("MAC: {:x?}", mac);
+
 				let path = &[path, "ethernet-phy"].concat();
 				debug!("{}", path);
 				let phy = dtb
@@ -201,6 +293,36 @@ fn walk_nodes<'a, 'b>(dtb: &Dtb<'a>, path: &'b str, level: usize) {
 				}
 			} else {
 				warn!("The interrupt controller is not supported");
+			}
+		} else if node.starts_with("virtio_mmio@") {
+			debug!("Found virtio mmio device");
+			let path = &[path, node, "/"].concat();
+
+			let reg = dtb
+				.get_property(path, "reg")
+				.expect("Reg property for virtio mmio not found in dtb");
+			let mut virtio_size: u64 = 0;
+			let mut virtio_base: u64 = 0;
+			for i in 8..16 {
+				virtio_size <<= 8;
+				virtio_size += reg[i] as u64;
+			}
+			for i in 0..8 {
+				virtio_base <<= 8;
+				virtio_base += reg[i] as u64;
+			}
+
+			let interrupts = dtb
+				.get_property(path, "interrupts")
+				.expect("interrupts property for virtio mmio not found in dtb");
+			let irq: u8 = interrupts[3];
+
+			unsafe {
+				DEVICES_AVAILABLE.push(Device::VIRTIO_MMIO(VirtioMMIO {
+					base: virtio_base as usize,
+					size: virtio_size as usize,
+					irq: irq as u32,
+				}));
 			}
 		}
 		walk_nodes(&dtb, &[path, node, "/"].concat(), level + 1);

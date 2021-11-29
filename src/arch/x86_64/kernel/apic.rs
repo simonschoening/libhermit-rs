@@ -20,9 +20,8 @@ use crate::x86::msr::*;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use arch::x86_64::kernel::{idt, irq, percore::*, processor, BOOT_INFO};
+#[cfg(feature = "pci")]
 use core::arch::x86_64::_mm_mfence;
-#[cfg(feature = "smp")]
-use core::convert::TryInto;
 use core::hint::spin_loop;
 #[cfg(feature = "smp")]
 use core::ptr;
@@ -692,6 +691,7 @@ pub fn ipi_tlb_flush() {
 }
 
 /// Send an inter-processor interrupt to wake up a CPU Core that is in a HALT state.
+#[allow(unused_variables)]
 pub fn wakeup_core(core_id_to_wakeup: CoreId) {
 	#[cfg(feature = "smp")]
 	if core_id_to_wakeup != core_id() {

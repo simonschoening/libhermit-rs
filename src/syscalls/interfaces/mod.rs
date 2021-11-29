@@ -1,18 +1,18 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use core::convert::{TryFrom, TryInto};
 use core::{isize, ptr, slice, str};
 
 use crate::arch;
-#[cfg(target_arch = "riscv64")]
-use crate::arch::kernel::mmio::get_network_driver;
-#[cfg(all(feature = "pci", not(target_arch = "riscv64")))]
-use crate::arch::kernel::pci::get_network_driver;
 use crate::console::CONSOLE;
 use crate::environment;
 use crate::errno::*;
+use crate::ffi::CStr;
 use crate::syscalls::fs::{self, FilePerms, PosixFile, SeekWhence};
-use crate::util;
+
+#[cfg(all(not(feature = "pci"), not(target_arch = "aarch64")))]
+use arch::kernel::mmio::get_network_driver;
+#[cfg(all(feature = "pci", not(target_arch = "aarch64")))]
+use arch::kernel::pci::get_network_driver;
 
 pub use self::generic::*;
 pub use self::uhyve::*;
@@ -110,47 +110,47 @@ pub trait SyscallInterface: Send + Sync {
 	}
 
 	fn get_mac_address(&self) -> Result<[u8; 6], ()> {
-		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		#[cfg(not(target_arch = "aarch64"))]
 		match get_network_driver() {
 			Some(driver) => Ok(driver.lock().get_mac_address()),
 			_ => Err(()),
 		}
-		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
+		#[cfg(target_arch = "aarch64")]
 		Err(())
 	}
 
 	fn get_mtu(&self) -> Result<u16, ()> {
-		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		#[cfg(not(target_arch = "aarch64"))]
 		match get_network_driver() {
 			Some(driver) => Ok(driver.lock().get_mtu()),
 			_ => Err(()),
 		}
-		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
+		#[cfg(target_arch = "aarch64")]
 		Err(())
 	}
 
 	fn has_packet(&self) -> bool {
-		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		#[cfg(not(target_arch = "aarch64"))]
 		match get_network_driver() {
 			Some(driver) => driver.lock().has_packet(),
 			_ => false,
 		}
-		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
+		#[cfg(target_arch = "aarch64")]
 		false
 	}
 
 	fn get_tx_buffer(&self, len: usize) -> Result<(*mut u8, usize), ()> {
-		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		#[cfg(not(target_arch = "aarch64"))]
 		match get_network_driver() {
 			Some(driver) => driver.lock().get_tx_buffer(len),
 			_ => Err(()),
 		}
-		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
+		#[cfg(target_arch = "aarch64")]
 		Err(())
 	}
 
 	fn free_tx_buffer(&self, handle: usize) -> Result<(), ()> {
-		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		#[cfg(not(target_arch = "aarch64"))]
 		match get_network_driver() {
 			Some(driver) => {
 				driver.lock().free_tx_buffer(handle);
@@ -158,32 +158,32 @@ pub trait SyscallInterface: Send + Sync {
 			}
 			_ => Err(()),
 		}
-		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
+		#[cfg(target_arch = "aarch64")]
 		Err(())
 	}
 
 	fn send_tx_buffer(&self, handle: usize, len: usize) -> Result<(), ()> {
-		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		#[cfg(not(target_arch = "aarch64"))]
 		match get_network_driver() {
 			Some(driver) => driver.lock().send_tx_buffer(handle, len),
 			_ => Err(()),
 		}
-		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
+		#[cfg(target_arch = "aarch64")]
 		Err(())
 	}
 
 	fn receive_rx_buffer(&self) -> Result<(&'static [u8], usize), ()> {
-		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		#[cfg(not(target_arch = "aarch64"))]
 		match get_network_driver() {
 			Some(driver) => driver.lock().receive_rx_buffer(),
 			_ => Err(()),
 		}
-		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
+		#[cfg(target_arch = "aarch64")]
 		Err(())
 	}
 
 	fn rx_buffer_consumed(&self, handle: usize) -> Result<(), ()> {
-		#[cfg(any(feature = "pci", target_arch = "riscv64"))]
+		#[cfg(not(target_arch = "aarch64"))]
 		match get_network_driver() {
 			Some(driver) => {
 				driver.lock().rx_buffer_consumed(handle);
@@ -191,7 +191,7 @@ pub trait SyscallInterface: Send + Sync {
 			}
 			_ => Err(()),
 		}
-		#[cfg(not(any(target_arch = "riscv64", feature = "pci")))]
+		#[cfg(target_arch = "aarch64")]
 		Err(())
 	}
 
@@ -203,12 +203,12 @@ pub trait SyscallInterface: Send + Sync {
 
 	#[cfg(target_arch = "x86_64")]
 	fn unlink(&self, name: *const u8) -> i32 {
-		let name = unsafe { util::c_str_to_str(name) };
+		let name = unsafe { CStr::from_ptr(name as _) }.to_str().unwrap();
 		debug!("unlink {}", name);
 
 		fs::FILESYSTEM
 			.lock()
-			.unlink(&name)
+			.unlink(name)
 			.expect("Unlinking failed!"); // TODO: error handling
 		0
 	}
@@ -225,11 +225,11 @@ pub trait SyscallInterface: Send + Sync {
 		//! flags is bitmask of O_DEC_* defined above.
 		//! (taken from rust stdlib/sys hermit target )
 
-		let name = unsafe { util::c_str_to_str(name) };
+		let name = unsafe { CStr::from_ptr(name as _) }.to_str().unwrap();
 		debug!("Open {}, {}, {}", name, flags, mode);
 
 		let mut fs = fs::FILESYSTEM.lock();
-		let fd = fs.open(&name, open_flags_to_perm(flags, mode as u32));
+		let fd = fs.open(name, open_flags_to_perm(flags, mode as u32));
 
 		if let Ok(fd) = fd {
 			fd as i32

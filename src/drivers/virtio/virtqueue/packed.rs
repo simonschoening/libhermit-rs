@@ -4,6 +4,9 @@
 
 use self::error::VqPackedError;
 use super::super::features::Features;
+#[cfg(not(feature = "pci"))]
+use super::super::transport::mmio::{ComCfg, NotifCfg, NotifCtrl};
+#[cfg(feature = "pci")]
 use super::super::transport::pci::{ComCfg, NotifCfg, NotifCtrl};
 use super::error::VirtqError;
 use super::{
@@ -16,7 +19,6 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
-use core::convert::TryFrom;
 use core::sync::atomic::{fence, Ordering};
 use core::{cell::RefCell, ptr};
 

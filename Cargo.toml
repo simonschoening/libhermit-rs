@@ -4,6 +4,13 @@ version = "0.3.53"
 authors = [
 	"Stefan Lankes <slankes@eonerc.rwth-aachen.de>",
 	"Colin Finck <colin.finck@rwth-aachen.de>",
+	"Martin Kroening",
+	"Frederik Schulz",
+	"Thomas Lambertz",
+	"Jonathan Klimt <jonathan.klimt@eonerc.rwth-aachen.de>",
+	"Jonathan Schwender",
+	"Daniel Krebs",
+	"Yu Duan",
 ]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
@@ -11,7 +18,7 @@ keywords = ["unikernel", "libos"]
 categories = ["os"]
 repository = "https://github.com/hermitcore/rusty-hermit"
 documentation = "https://hermitcore.github.io/libhermit-rs/hermit/"
-edition = "2018"
+edition = "2021"
 description = "A Rust-based library operting system"
 exclude = [
 	"/.github/*",
@@ -84,26 +91,6 @@ hermit-dtb = {git = "https://github.com/hermitcore/dtb.git", branch = "master"}
 
 [target.'cfg(target_arch = "riscv64")'.dependencies.tock-registers]
 version = "0.7.0"
-
-# The development profile, used for `cargo build`.
-[profile.dev]
-opt-level = 1      # controls the `--opt-level` the compiler builds with
-debug = true       # controls whether the compiler passes `-C debuginfo`
-# a value of `true` is equivalent to `2`
-rpath = false      # controls whether the compiler passes `-C rpath`
-lto = false         # controls `-C lto` for binaries and staticlibs
-debug-assertions = true # controls whether debug assertions are enabled
-# Disabled because of https://github.com/rust-lang/cargo/issues/7359
-# panic = "abort" # Call abort on panic https://github.com/rust-lang/rust/pull/32900
-
-# The release profile, used for `cargo build --release`.
-[profile.release]
-opt-level = 2
-debug = false
-rpath = false
-lto = false
-debug-assertions = false
-# panic = "abort"
 
 [patch.crates-io]
 riscv = { git = "https://github.com/simonschoening/riscv.git" }

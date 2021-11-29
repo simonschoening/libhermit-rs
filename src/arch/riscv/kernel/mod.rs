@@ -1,4 +1,5 @@
 mod devicetree;
+pub mod externs_linux;
 pub mod irq;
 pub mod mmio;
 pub mod pci;
@@ -10,7 +11,6 @@ pub mod serial;
 mod start;
 pub mod switch;
 pub mod systemtime;
-pub mod externs_linux;
 
 pub use crate::arch::riscv::kernel::devicetree::{get_mem_base, init_drivers};
 use crate::arch::riscv::kernel::percore::*;
@@ -435,7 +435,7 @@ fn finish_processor_init() {
 					_start as *const () as usize,
 					BOOT_INFO as usize,
 				);
-				info!("sbi_hart_start: {:?}", ret);
+				trace!("sbi_hart_start: {:?}", ret);
 			}
 		}
 	} else {

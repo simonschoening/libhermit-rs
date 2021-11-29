@@ -7,7 +7,6 @@ use alloc::collections::{LinkedList, VecDeque};
 use alloc::rc::Rc;
 use core::cell::RefCell;
 use core::cmp::Ordering;
-use core::convert::TryInto;
 use core::fmt;
 use core::num::NonZeroU64;
 
@@ -221,6 +220,7 @@ impl TaskHandlePriorityQueue {
 	}
 }
 
+#[derive(Default)]
 struct QueueHead {
 	head: Option<Rc<RefCell<Task>>>,
 	tail: Option<Rc<RefCell<Task>>>,
@@ -228,15 +228,6 @@ struct QueueHead {
 
 impl QueueHead {
 	pub const fn new() -> Self {
-		Self {
-			head: None,
-			tail: None,
-		}
-	}
-}
-
-impl Default for QueueHead {
-	fn default() -> Self {
 		Self {
 			head: None,
 			tail: None,

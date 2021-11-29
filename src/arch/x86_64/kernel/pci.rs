@@ -10,7 +10,6 @@ use crate::drivers::virtio::transport::pci::VirtioDriver;
 use crate::synch::spinlock::SpinlockIrqSave;
 use crate::x86::io::*;
 use alloc::vec::Vec;
-use core::convert::TryInto;
 use core::{fmt, u32, u8};
 
 // TODO: should these be pub? currently needed since used in virtio.rs maybe use getter methods to be more flexible.
@@ -139,6 +138,7 @@ impl<'a> PciDriver<'a> {
 		}
 	}
 }
+
 pub fn register_driver(drv: PciDriver<'static>) {
 	unsafe {
 		PCI_DRIVERS.push(drv);

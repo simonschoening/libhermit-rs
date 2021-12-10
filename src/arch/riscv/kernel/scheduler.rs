@@ -162,6 +162,7 @@ impl TaskStacks {
 		);
 
 		// clear user stack
+		debug!("Clearing user stack...");
 		unsafe {
 			ptr::write_bytes(
 				(virt_addr + KERNEL_STACK_SIZE + DEFAULT_STACK_SIZE + 3 * BasePageSize::SIZE)
@@ -171,6 +172,8 @@ impl TaskStacks {
 				user_stack_size,
 			);
 		}
+
+		debug!("Creating stacks finished");
 
 		TaskStacks::Common(CommonStack {
 			virt_addr,

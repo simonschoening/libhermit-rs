@@ -6,7 +6,7 @@ use crate::arch::riscv::kernel::{get_timebase_freq, is_uhyve};
 use crate::scheduler::CoreId;
 use core::convert::TryInto;
 use riscv::asm::wfi;
-use riscv::register::{sie, time, sstatus};
+use riscv::register::{sie, sstatus, time};
 
 /// Current FPU state. Saved at context switch when changed
 #[repr(C, packed)]

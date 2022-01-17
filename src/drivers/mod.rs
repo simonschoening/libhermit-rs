@@ -5,10 +5,7 @@
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 // UNCOMMENTED FOR CORRECT USE STATEMENT; IS THIS CORRECT?
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-#[cfg(any(
-	target_arch = "riscv64",
-	all(feature = "pci", not(target_arch = "aarch64"))
-))]
+#[cfg(not(target_arch = "aarch64"))]
 pub mod net;
 
 #[cfg(not(target_arch = "aarch64"))]
@@ -21,9 +18,10 @@ pub mod virtio;
 pub mod error {
 	#[cfg(target_arch = "riscv64")]
 	use crate::drivers::net::gem::GEMError;
+	#[cfg(target_arch = "riscv64")]
+	use crate::drivers::net::emac::EMACError;
 	#[cfg(feature = "pci")]
 	use crate::drivers::net::rtl8139::RTL8139Error;
-	#[cfg(any(feature = "pci", target_arch = "riscv64"))]
 	use crate::drivers::virtio::error::VirtioError;
 	use core::fmt;
 
@@ -34,9 +32,10 @@ pub mod error {
 		InitRTL8139DevFail(RTL8139Error),
 		#[cfg(target_arch = "riscv64")]
 		InitGEMDevFail(GEMError),
+		#[cfg(target_arch = "riscv64")]
+		InitEMACDevFail(EMACError),
 	}
 
-	#[cfg(feature = "pci")]
 	impl From<VirtioError> for DriverError {
 		fn from(err: VirtioError) -> Self {
 			DriverError::InitVirtioDevFail(err)
@@ -57,6 +56,13 @@ pub mod error {
 		}
 	}
 
+	#[cfg(target_arch = "riscv64")]
+	impl From<EMACError> for DriverError {
+		fn from(err: EMACError) -> Self {
+			DriverError::InitEMACDevFail(err)
+		}
+	}
+
 	impl fmt::Display for DriverError {
 		fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 			match *self {
@@ -70,6 +76,10 @@ pub mod error {
 				#[cfg(target_arch = "riscv64")]
 				DriverError::InitGEMDevFail(ref err) => {
 					write!(f, "GEM driver failed: {:?}", err)
+				}
+				#[cfg(target_arch = "riscv64")]
+				DriverError::InitEMACDevFail(ref err) => {
+					write!(f, "EMAC driver failed: {:?}", err)
 				}
 			}
 		}

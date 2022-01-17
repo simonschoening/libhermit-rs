@@ -736,7 +736,7 @@ pub fn init_page_tables() {
 	unsafe {
 		identity_map::<HugePageSize>(
 			get_mem_base(),
-			get_mem_base() + PhysAddr(physicalmem::total_memory_size() as u64 - 1),
+			PhysAddr(0x80000000) + PhysAddr(physicalmem::total_memory_size() as u64 - 1),
 		);
 		satp::write(0x8 << 60 | ((&ROOT_PAGETABLE as *const _ as usize) >> 12))
 	}

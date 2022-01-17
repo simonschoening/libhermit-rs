@@ -255,7 +255,12 @@ pub fn halt() {
 pub fn shutdown() -> ! {
 	info!("Shutting down system");
 	//SBI shutdown
-	sbi::shutdown_legacy()
+	//sbi::shutdown_legacy()
+	sbi::sbi_system_reset(1,1);
+
+	loop{
+		
+	}
 }
 
 pub fn get_timer_ticks() -> u64 {

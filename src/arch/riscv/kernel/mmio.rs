@@ -1,4 +1,5 @@
 use crate::drivers::net::gem::{self, GEMDriver};
+use crate::drivers::net::emac::{self, EMACDriver};
 use crate::drivers::net::virtio_net::VirtioNetDriver;
 use crate::drivers::net::NetworkInterface;
 use crate::synch::spinlock::SpinlockIrqSave;
@@ -11,6 +12,7 @@ static mut MMIO_DRIVERS: Vec<MmioDriver> = Vec::new();
 
 pub enum MmioDriver {
 	GEMNet(SpinlockIrqSave<GEMDriver>),
+	EMACNet(SpinlockIrqSave<EMACDriver>),
 	VirtioNet(SpinlockIrqSave<VirtioNetDriver>),
 }
 
@@ -19,6 +21,7 @@ impl<'a> MmioDriver {
 		match self {
 			Self::VirtioNet(drv) => Some(drv),
 			Self::GEMNet(drv) => Some(drv),
+			Self::EMACNet(drv) => Some(drv),
 			_ => None,
 		}
 	}

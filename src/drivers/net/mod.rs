@@ -9,6 +9,9 @@ pub mod virtio_pci;
 #[cfg(target_arch = "riscv64")]
 pub mod gem;
 
+#[cfg(target_arch = "riscv64")]
+pub mod emac;
+
 #[cfg(target_arch = "x86_64")]
 use crate::arch::kernel::apic;
 #[cfg(target_arch = "x86_64")]

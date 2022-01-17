@@ -10,6 +10,7 @@ use core::ptr;
 use hermit_dtb::Dtb;
 
 use crate::drivers::net::gem::{self, GEMDriver};
+use crate::drivers::net::emac::{self, EMACDriver};
 use crate::synch::spinlock::SpinlockIrqSave;
 
 pub const MAGIC_VALUE: u32 = 0x74726976 as u32;
@@ -22,6 +23,14 @@ enum Model {
 }
 
 struct Gem {
+	base: usize,
+	size: usize,
+	irq: u8,
+	phy_addr: u8,
+	mac: [u8; 6],
+}
+
+struct Emac {
 	base: usize,
 	size: usize,
 	irq: u8,
@@ -42,6 +51,7 @@ struct Plic {
 
 enum Device {
 	GEM(Gem),
+	EMAC(Emac),
 	PLIC(Plic),
 	VIRTIO_MMIO(VirtioMMIO),
 }
@@ -117,6 +127,26 @@ pub fn init_drivers() {
 						gem.mac,
 					) {
 						Ok(drv) => register_driver(MmioDriver::GEMNet(SpinlockIrqSave::new(drv))),
+						Err(_) => (), // could have an info which driver failed
+					}
+				}
+				Device::EMAC(emac) => {
+					//TODO: Make sure that PLIC is initialized
+					debug!(
+						"Init EMAC at {:x}, irq: {}, phy_addr: {}",
+						emac.base, emac.irq, emac.phy_addr
+					);
+					paging::identity_map::<paging::HugePageSize>(
+						PhysAddr(emac.base as u64),
+						PhysAddr((emac.base + emac.size - 1) as u64),
+					);
+					match emac::init_device(
+						VirtAddr(emac.base as u64),
+						emac.irq.into(),
+						emac.phy_addr.into(),
+						emac.mac,
+					) {
+						Ok(drv) => register_driver(MmioDriver::EMACNet(SpinlockIrqSave::new(drv))),
 						Err(_) => (), // could have an info which driver failed
 					}
 				}
@@ -253,6 +283,48 @@ fn walk_nodes<'a, 'b>(dtb: &Dtb<'a>, path: &'b str, level: usize) {
 						mac: <[u8; 6]>::try_from(mac).expect("mac with invalid length"),
 					}));
 				}
+			} else if compatible.contains("allwinner") {
+				let reg = dtb
+					.get_property(path, "reg")
+					.expect("Reg property for ethernet not found in dtb");
+				let mut emac_size: u64 = 0;
+				let mut emac_base: u64 = 0;
+				for i in 4..8 {
+					emac_size <<= 8;
+					emac_size += reg[i] as u64;
+				}
+				for i in 0..4 {
+					emac_base <<= 8;
+					emac_base += reg[i] as u64;
+				}
+
+				let interrupts = dtb
+					.get_property(path, "interrupts")
+					.expect("interrupts property for ethernet not found in dtb");
+				let irq: u8 = interrupts[3];
+
+				// let mac = dtb
+				// 	.get_property(path, "local-mac-address")
+				// 	.expect("local-mac-address property for ethernet not found in dtb");
+				let mac: [u8; 6] = unsafe { [0x70, 0xb3, 0xd5, 0x92, 0xf6, 0x89] };
+				debug!("MAC: {:x?}", mac);
+
+				let path = &[path, "mdio/ethernet-phy"].concat();
+				debug!("{}", path);
+				let phy = dtb
+					.get_property(path, "reg")
+					.expect("Reg property for ethernet-phy not found in dtb");
+				let phy_addr: u8 = phy[3];
+
+				unsafe {
+					DEVICES_AVAILABLE.push(Device::EMAC(Emac {
+						base: emac_base as usize,
+						size: emac_size as usize,
+						irq: irq,
+						phy_addr: phy_addr,
+						mac: mac,
+					}));
+				}
 			} else {
 				warn!("The ethernet controller is not supported");
 			}
@@ -266,17 +338,18 @@ fn walk_nodes<'a, 'b>(dtb: &Dtb<'a>, path: &'b str, level: usize) {
 			)
 			.unwrap();
 			debug!("Compatible: {}", compatible);
-			if compatible.contains("sifive,plic-1.0.0") {
+			if compatible.contains("sifive,plic-1.0.0") || compatible.contains("c900-plic"){
 				let reg = dtb
 					.get_property(path, "reg")
 					.expect("Reg property for plic not found in dtb");
+				let reg_len = reg.len();
 				let mut plic_size: u64 = 0;
 				let mut plic_base: u64 = 0;
-				for i in 8..16 {
+				for i in (reg_len/2)..reg_len {
 					plic_size <<= 8;
 					plic_size += reg[i] as u64;
 				}
-				for i in 0..8 {
+				for i in 0..(reg_len/2) {
 					plic_base <<= 8;
 					plic_base += reg[i] as u64;
 				}

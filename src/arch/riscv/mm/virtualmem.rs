@@ -21,7 +21,7 @@ const TASK_VIRTUAL_MEMORY_END: VirtAddr = VirtAddr(0x8000000000);
 pub fn init() {
 	let entry = FreeListEntry {
 		start: align_up!(
-			(get_mem_base() + PhysAddr(physicalmem::total_memory_size() as u64)).as_usize(),
+			(PhysAddr(0x80000000) + PhysAddr(physicalmem::total_memory_size() as u64)).as_usize(),
 			HugePageSize::SIZE
 		),
 		end: KERNEL_VIRTUAL_MEMORY_END.as_usize(),

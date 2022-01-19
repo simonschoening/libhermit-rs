@@ -5,6 +5,7 @@ use core::{mem, ptr};
 use crate::arch::riscv::kernel::percore::*;
 use crate::arch::riscv::kernel::processor;
 use crate::arch::riscv::kernel::sbi;
+use crate::arch::riscv::kernel::processor::set_oneshot_timer;
 use crate::arch::riscv::mm::paging::{BasePageSize, PageSize, PageTableEntryFlags};
 use crate::arch::riscv::mm::{PhysAddr, VirtAddr};
 use crate::environment;
@@ -12,6 +13,7 @@ use crate::scheduler::task::{Task, TaskFrame};
 use crate::{DEFAULT_STACK_SIZE, KERNEL_STACK_SIZE};
 use alloc::rc::Rc;
 use core::cell::RefCell;
+use riscv::register::sie;
 
 /* extern "C" {
 	static tls_start: u8;
@@ -459,7 +461,7 @@ extern "C" {
 pub fn timer_handler() {
 	//increment_irq_counter(apic::TIMER_INTERRUPT_NUMBER.into());
 	core_scheduler().handle_waiting_tasks();
-	//apic::eoi();
+	set_oneshot_timer(None);
 	core_scheduler().scheduler();
 }
 
@@ -469,6 +471,9 @@ pub fn wakeup_handler() {
 	//increment_irq_counter(WAKEUP_INTERRUPT_NUMBER.into());
 	let core_scheduler = core_scheduler();
 	core_scheduler.check_input();
+	unsafe {
+		sie::clear_ssoft();
+	}
 	if core_scheduler.is_scheduling() {
 		core_scheduler.scheduler();
 	}

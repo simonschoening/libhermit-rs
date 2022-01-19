@@ -1,8 +1,8 @@
-use crate::arch::riscv::kernel::processor::set_oneshot_timer;
 use riscv::asm::wfi;
 use riscv::register::scause::Scause;
 use riscv::register::*;
 use trapframe::TrapFrame;
+use alloc::vec::Vec;
 
 use crate::synch::spinlock::Spinlock;
 
@@ -11,6 +11,9 @@ static PLIC_BASE: Spinlock<usize> = Spinlock::new(0x0);
 
 /// PLIC context for new interrupt handlers
 static PLIC_CONTEXT: Spinlock<u16> = Spinlock::new(0x0);
+
+/// PLIC context for new interrupt handlers
+static CURRENT_INTERRUPTS: Spinlock<Vec<u32>> = Spinlock::new(Vec::new());
 
 const PLIC_PENDING_OFFSET: usize = 0x001000;
 const PLIC_ENABLE_OFFSET: usize = 0x002000;
@@ -83,11 +86,10 @@ pub fn enable_and_wait() {
 			}
 
 			if pending_interrupts.stimer() {
-				// Disable Supervisor-level software interrupt
-				sie::clear_ssoft();
-				// Setting the timer clears the pending interrupt
+				// // Disable Supervisor-level software interrupt, wakeup not needed
+				// sie::clear_ssoft();
+
 				debug!("sip: {:x?}", pending_interrupts);
-				set_oneshot_timer(None);
 				trace!("TIMER");
 				crate::arch::riscv::kernel::scheduler::timer_handler();
 				break;
@@ -206,8 +208,11 @@ fn external_handler() {
 			let irq = core::ptr::read_volatile(claim_address as *mut u32);
 			if irq != 0 {
 				debug!("External INT: {}", irq);
-				// Complete interrupt
-				core::ptr::write_volatile(claim_address as *mut u32, irq);
+				let mut cur_int = CURRENT_INTERRUPTS.lock();
+				cur_int.push(irq);
+				if cur_int.len() > 1 {
+					warn!("More than one external interrupt is pending!");
+				}
 
 				// Call handler
 				if IRQ_HANDLERS[irq as usize - 1] != 0 {
@@ -226,5 +231,25 @@ fn external_handler() {
 		if let Some(handler) = handler {
 			handler();
 		}
+	}
+}
+
+/// End of external interrupt
+pub fn external_eoi() {
+	unsafe {
+		let base_ptr = PLIC_BASE.lock();
+		let context = PLIC_CONTEXT.lock();
+		let claim_address = *base_ptr + 0x20_0004 + 0x1000 * (*context as usize);
+		
+		let mut cur_int = CURRENT_INTERRUPTS.lock();
+		let irq = cur_int.pop().unwrap_or(0);
+		if irq != 0 {
+			debug!("EOI INT: {}", irq);
+			// Complete interrupt
+			core::ptr::write_volatile(claim_address as *mut u32, irq);
+		} else {
+			warn!("Called EOI without active interrupt");
+		}
+
 	}
 }

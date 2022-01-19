@@ -9,6 +9,9 @@ pub mod virtio_pci;
 #[cfg(target_arch = "riscv64")]
 pub mod gem;
 
+
+#[cfg(target_arch = "riscv64")]
+use crate::arch::kernel::irq::external_eoi;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::kernel::apic;
 #[cfg(target_arch = "x86_64")]
@@ -115,8 +118,8 @@ pub extern "x86-interrupt" fn network_irqhandler(_stack_frame: ExceptionStackFra
 pub fn network_irqhandler() {
 	debug!("Receive network interrupt");
 
-	// TODO: PLIC end of interrupt
-	//apic::eoi();
+	// PLIC end of interrupt
+	external_eoi();
 
 	#[cfg(feature = "pci")]
 	let check_scheduler = match pci::get_network_driver() {
